@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Miro Recent Boards</title>
+  </head>
+  <body>
+    <main class="app" id="app">
+      <section class="header">
+        <h1>Recent boards</h1>
+        <p class="subtitle" id="subtitle"></p>
+      </section>
+
+      <section class="table-wrap">
+        <table class="boards">
+          <thead>
+            <tr>
+              <th scope="col">Name</th>
+              <th scope="col">Modified</th>
+            </tr>
+          </thead>
+          <tbody id="boards-tbody"></tbody>
+        </table>
+      </section>
+    </main>
+    <script type="module" src="/src/recent-boards.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,102 @@
+.app {
+  max-width: 640px;
+  padding: var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.header h1 {
+  word-break: break-word;
+}
+
+.subtitle {
+  color: var(--color-text-secondary);
+  font-size: var(--font-text-sm-size);
+  margin: 0;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--spacing-sm);
+}
+
+.frame-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm);
+  border-radius: var(--border-radius-md);
+  background: var(--color-background-secondary);
+  border-left: 3px solid var(--color-accent);
+  min-height: 5rem;
+}
+
+.frame-card.clickable {
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+
+.frame-card.clickable:hover,
+.frame-card.clickable:focus-visible {
+  background: color-mix(
+    in srgb,
+    var(--color-background-secondary) 85%,
+    var(--color-background-inverse)
+  );
+  outline: none;
+}
+
+.frame-card.clickable:focus-visible {
+  outline: calc(var(--border-width-regular) * 2) solid var(--color-ring-primary);
+  outline-offset: var(--border-width-regular);
+}
+
+.frame-title {
+  font-size: var(--font-heading-sm-size);
+  font-weight: var(--font-weight-bold);
+  word-break: break-word;
+}
+
+.frame-meta {
+  margin: 0;
+  font-size: var(--font-text-sm-size);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: var(--spacing-sm);
+  gap: var(--spacing-md);
+}
+
+.actions .count-summary {
+  color: var(--color-text-secondary);
+  font-size: var(--font-text-sm-size);
+}
+
+.empty {
+  grid-column: 1 / -1;
+  padding: var(--spacing-lg);
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.error {
+  padding: var(--spacing-md);
+  border-radius: var(--border-radius-md);
+  background: var(--color-background-info);
+  color: var(--color-text-info);
+  font-size: var(--font-text-sm-size);
+}

@@ -1,0 +1,123 @@
+.app {
+  max-width: 720px;
+  padding: var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.header h1 {
+  word-break: break-word;
+}
+
+.subtitle {
+  color: var(--color-text-secondary);
+  font-size: var(--font-text-sm-size);
+  margin: 0;
+}
+
+.clusters {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--spacing-md);
+  align-items: start;
+}
+
+.cluster {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.cluster-header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding-bottom: var(--spacing-xs);
+  border-bottom: var(--border-width-regular) solid var(--color-border);
+}
+
+.cluster-header .swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  border: var(--border-width-regular) solid var(--color-border);
+  flex: 0 0 auto;
+}
+
+.cluster-header .cluster-name {
+  flex: 1;
+  font-size: var(--font-text-sm-size);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.cluster-header .cluster-count {
+  font-size: var(--font-text-sm-size);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.sticky-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.sticky {
+  padding: var(--spacing-sm);
+  border-radius: var(--border-radius-md);
+  font-size: var(--font-text-sm-size);
+  line-height: 1.35;
+  word-break: break-word;
+  min-height: 3rem;
+  display: flex;
+  align-items: flex-start;
+}
+
+.sticky.clickable {
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+
+.sticky.clickable:hover,
+.sticky.clickable:focus-visible {
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.sticky.clickable:focus-visible {
+  outline: calc(var(--border-width-regular) * 2) solid var(--color-ring-primary);
+  outline-offset: var(--border-width-regular);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: var(--spacing-sm);
+}
+
+.empty {
+  grid-column: 1 / -1;
+  padding: var(--spacing-lg);
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.error {
+  padding: var(--spacing-md);
+  border-radius: var(--border-radius-md);
+  background: var(--color-background-info);
+  color: var(--color-text-info);
+  font-size: var(--font-text-sm-size);
+}

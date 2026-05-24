@@ -51,13 +51,41 @@ export interface BoardItem {
     title?: string;
     shape?: string;
   };
+  style?: {
+    fillColor?: string;
+    borderColor?: string;
+  };
   position?: { x: number; y: number };
+  geometry?: { width?: number; height?: number };
   modifiedAt?: string;
   links?: { self?: string };
 }
 
 export interface BoardItemsResponse {
   data: BoardItem[];
+  total: number;
+  size: number;
+  links?: { self?: string; next?: string };
+}
+
+export interface BoardsResponse {
+  data: Board[];
+  total: number;
+  size: number;
+  links?: { self?: string; next?: string };
+}
+
+export interface Connector {
+  id: string;
+  shape?: string;
+  startItem?: { id: string };
+  endItem?: { id: string };
+  captions?: Array<{ content?: string }>;
+  modifiedAt?: string;
+}
+
+export interface ConnectorsResponse {
+  data: Connector[];
   total: number;
   size: number;
   links?: { self?: string; next?: string };
@@ -79,6 +107,26 @@ export async function listBoardItems(
   const qs = params.toString() ? `?${params.toString()}` : "";
   return miroFetch<BoardItemsResponse>(
     `/boards/${encodeURIComponent(boardId)}/items${qs}`,
+  );
+}
+
+export async function listBoards(
+  opts: { limit?: number; sort?: string } = {},
+): Promise<BoardsResponse> {
+  const params = new URLSearchParams();
+  params.set("limit", String(opts.limit ?? 20));
+  if (opts.sort) params.set("sort", opts.sort);
+  return miroFetch<BoardsResponse>(`/boards?${params.toString()}`);
+}
+
+export async function listConnectors(
+  boardId: string,
+  opts: { limit?: number } = {},
+): Promise<ConnectorsResponse> {
+  const params = new URLSearchParams();
+  params.set("limit", String(opts.limit ?? 50));
+  return miroFetch<ConnectorsResponse>(
+    `/boards/${encodeURIComponent(boardId)}/connectors?${params.toString()}`,
   );
 }
 
@@ -181,4 +229,192 @@ function deriveLabel(item: BoardItem): string {
   if (stripped)
     return stripped.length > 80 ? stripped.slice(0, 77) + "…" : stripped;
   return `${item.type} ${item.id.slice(0, 8)}`;
+}
+
+// ---- Tool 3: frame_overview ----
+
+export interface FrameOverviewResult {
+  boardId: string;
+  boardName: string;
+  viewLink: string;
+  frames: Array<{
+    id: string;
+    title: string;
+    width?: number;
+    height?: number;
+    modifiedAt?: string;
+    selfLink?: string;
+  }>;
+}
+
+export async function buildFrameOverview(
+  boardId: string,
+): Promise<FrameOverviewResult> {
+  const [board, frames] = await Promise.all([
+    getBoard(boardId),
+    listBoardItems(boardId, { type: "frame", limit: 50 }),
+  ]);
+  return {
+    boardId: board.id,
+    boardName: board.name,
+    viewLink: board.viewLink,
+    frames: frames.data.map((f) => ({
+      id: f.id,
+      title: deriveLabel(f),
+      width: f.geometry?.width,
+      height: f.geometry?.height,
+      modifiedAt: f.modifiedAt,
+      selfLink: f.links?.self,
+    })),
+  };
+}
+
+// ---- Tool 4: sticky_clusters ----
+
+export interface StickyClustersResult {
+  boardId: string;
+  boardName: string;
+  viewLink: string;
+  totalStickies: number;
+  clusters: Array<{
+    color: string;
+    count: number;
+    stickies: Array<{
+      id: string;
+      label: string;
+      selfLink?: string;
+    }>;
+  }>;
+}
+
+export async function buildStickyClusters(
+  boardId: string,
+): Promise<StickyClustersResult> {
+  const [board, items] = await Promise.all([
+    getBoard(boardId),
+    listBoardItems(boardId, { type: "sticky_note", limit: 50 }),
+  ]);
+  const groups = new Map<
+    string,
+    Array<{ id: string; label: string; selfLink?: string }>
+  >();
+  for (const item of items.data) {
+    const color = item.style?.fillColor || "unknown";
+    if (!groups.has(color)) groups.set(color, []);
+    groups.get(color)!.push({
+      id: item.id,
+      label: deriveLabel(item),
+      selfLink: item.links?.self,
+    });
+  }
+  const clusters = Array.from(groups.entries())
+    .map(([color, stickies]) => ({ color, count: stickies.length, stickies }))
+    .sort((a, b) => b.count - a.count);
+  return {
+    boardId: board.id,
+    boardName: board.name,
+    viewLink: board.viewLink,
+    totalStickies: items.data.length,
+    clusters,
+  };
+}
+
+// ---- Tool 5: recent_boards ----
+
+export interface RecentBoardsResult {
+  boards: Array<{
+    id: string;
+    name: string;
+    description: string;
+    viewLink: string;
+    modifiedAt?: string;
+    createdAt?: string;
+  }>;
+}
+
+export async function buildRecentBoards(
+  limit: number = 20,
+): Promise<RecentBoardsResult> {
+  const res = await listBoards({ limit, sort: "last_modified" });
+  return {
+    boards: res.data.map((b) => ({
+      id: b.id,
+      name: b.name,
+      description: b.description,
+      viewLink: b.viewLink,
+      modifiedAt: b.modifiedAt,
+      createdAt: b.createdAt,
+    })),
+  };
+}
+
+// ---- Tool 6: connectors graph ----
+
+export interface ConnectorsGraphResult {
+  boardId: string;
+  boardName: string;
+  viewLink: string;
+  nodes: Array<{
+    id: string;
+    type: string;
+    label: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }>;
+  edges: Array<{
+    id: string;
+    from: string;
+    to: string;
+    caption?: string;
+  }>;
+}
+
+export async function buildConnectorsGraph(
+  boardId: string,
+): Promise<ConnectorsGraphResult> {
+  const [board, items, connectors] = await Promise.all([
+    getBoard(boardId),
+    listBoardItems(boardId, { limit: 50 }),
+    listConnectors(boardId, { limit: 50 }),
+  ]);
+
+  const referencedIds = new Set<string>();
+  for (const c of connectors.data) {
+    if (c.startItem?.id) referencedIds.add(c.startItem.id);
+    if (c.endItem?.id) referencedIds.add(c.endItem.id);
+  }
+
+  const nodes = items.data
+    .filter((i) => referencedIds.has(i.id))
+    .map((i) => ({
+      id: i.id,
+      type: i.type,
+      label: deriveLabel(i),
+      x: i.position?.x ?? 0,
+      y: i.position?.y ?? 0,
+      width: i.geometry?.width ?? 100,
+      height: i.geometry?.height ?? 100,
+    }));
+
+  const edges = connectors.data
+    .filter((c) => c.startItem?.id && c.endItem?.id)
+    .map((c) => ({
+      id: c.id,
+      from: c.startItem!.id,
+      to: c.endItem!.id,
+      caption: c.captions?.[0]?.content
+        ?.replace(/<[^>]+>/g, "")
+        .trim()
+        .slice(0, 40),
+    }));
+
+  return {
+    boardId: board.id,
+    boardName: board.name,
+    viewLink: board.viewLink,
+    nodes,
+    edges,
+  };
 }

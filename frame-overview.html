@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Miro Frame Overview</title>
+  </head>
+  <body>
+    <main class="app" id="app">
+      <section class="header">
+        <h1 id="board-name">Loading…</h1>
+        <p class="subtitle" id="subtitle"></p>
+      </section>
+
+      <section class="grid" id="grid"></section>
+
+      <div class="actions">
+        <span class="count-summary" id="count-summary"></span>
+        <button id="open-board-btn" type="button">Open board in Miro</button>
+      </div>
+    </main>
+    <script type="module" src="/src/frame-overview.ts"></script>
+  </body>
+</html>

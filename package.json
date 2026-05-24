@@ -8,7 +8,11 @@
   "scripts": {
     "build:ui:summary": "cross-env INPUT=board-summary.html vite build",
     "build:ui:list": "cross-env INPUT=list-items.html vite build",
-    "build:ui": "npm run build:ui:summary && npm run build:ui:list",
+    "build:ui:frames": "cross-env INPUT=frame-overview.html vite build",
+    "build:ui:stickies": "cross-env INPUT=sticky-clusters.html vite build",
+    "build:ui:recent": "cross-env INPUT=recent-boards.html vite build",
+    "build:ui:connectors": "cross-env INPUT=connectors.html vite build",
+    "build:ui": "npm run build:ui:summary && npm run build:ui:list && npm run build:ui:frames && npm run build:ui:stickies && npm run build:ui:recent && npm run build:ui:connectors",
     "build:server": "tsc -p tsconfig.server.json",
     "build": "tsc --noEmit && npm run build:ui && npm run build:server",
     "start": "node dist/main.js",

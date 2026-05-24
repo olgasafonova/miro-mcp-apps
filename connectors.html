@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Miro Connectors Graph</title>
+  </head>
+  <body>
+    <main class="app" id="app">
+      <section class="header">
+        <h1 id="board-name">Loading…</h1>
+        <p class="subtitle" id="subtitle"></p>
+      </section>
+
+      <section class="graph-wrap">
+        <svg id="graph" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Board connector graph"></svg>
+      </section>
+
+      <div class="actions">
+        <span class="count-summary" id="count-summary"></span>
+        <button id="open-board-btn" type="button">Open board in Miro</button>
+      </div>
+    </main>
+    <script type="module" src="/src/connectors.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,95 @@
+.app {
+  max-width: 640px;
+  padding: var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.subtitle {
+  color: var(--color-text-secondary);
+  font-size: var(--font-text-sm-size);
+  margin: 0;
+}
+
+.table-wrap {
+  max-height: 480px;
+  overflow-y: auto;
+  border: var(--border-width-regular) solid var(--color-border);
+  border-radius: var(--border-radius-md);
+}
+
+table.boards {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-text-sm-size);
+}
+
+table.boards thead th {
+  position: sticky;
+  top: 0;
+  background: var(--color-background-secondary);
+  text-align: left;
+  font-weight: var(--font-weight-bold);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-bottom: var(--border-width-regular) solid var(--color-border);
+}
+
+table.boards tbody td {
+  padding: var(--spacing-sm);
+  border-bottom: var(--border-width-regular) solid var(--color-border);
+  vertical-align: top;
+}
+
+table.boards tbody tr:last-child td {
+  border-bottom: none;
+}
+
+table.boards tbody tr.clickable {
+  cursor: pointer;
+}
+
+table.boards tbody tr.clickable:hover {
+  background: var(--color-background-secondary);
+}
+
+table.boards td.name {
+  word-break: break-word;
+}
+
+table.boards td.name strong {
+  font-weight: var(--font-weight-bold);
+}
+
+table.boards td.name .description {
+  margin: 2px 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-text-sm-size);
+}
+
+table.boards td.modified {
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.empty {
+  padding: var(--spacing-lg);
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.error {
+  padding: var(--spacing-md);
+  border-radius: var(--border-radius-md);
+  background: var(--color-background-info);
+  color: var(--color-text-info);
+  font-size: var(--font-text-sm-size);
+}
