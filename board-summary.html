@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Miro Board Summary</title>
+  </head>
+  <body>
+    <main class="app" id="app">
+      <section class="header">
+        <h1 id="board-name">Loading…</h1>
+        <p class="description" id="board-description"></p>
+      </section>
+
+      <section class="stats">
+        <div class="stat">
+          <span class="stat-label">Total items</span>
+          <span class="stat-value" id="stat-total">—</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Types</span>
+          <span class="stat-value" id="stat-types">—</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Last modified</span>
+          <span class="stat-value" id="stat-modified">—</span>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Items by type</h2>
+        <div class="chart" id="chart"></div>
+      </section>
+
+      <section class="section">
+        <h2>Recent items</h2>
+        <ul class="recent-list" id="recent-list"></ul>
+      </section>
+
+      <div class="actions">
+        <button id="open-board-btn" type="button">Open in Miro</button>
+      </div>
+    </main>
+    <script type="module" src="/src/board-summary.ts"></script>
+  </body>
+</html>

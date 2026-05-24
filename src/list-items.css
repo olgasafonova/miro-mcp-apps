@@ -1,0 +1,138 @@
+.app {
+  max-width: 640px;
+  padding: var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.header h1 {
+  word-break: break-word;
+}
+
+.subtitle {
+  color: var(--color-text-secondary);
+  font-size: var(--font-text-sm-size);
+  margin: 0;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs);
+}
+
+.filters .chip {
+  padding: 2px var(--spacing-sm);
+  border-radius: 999px;
+  background: var(--color-background-secondary);
+  border: var(--border-width-regular) solid var(--color-border);
+  color: var(--color-text-primary);
+  font-size: var(--font-text-sm-size);
+  cursor: pointer;
+  font-weight: var(--font-weight-normal);
+}
+
+.filters .chip[aria-pressed="true"] {
+  background: var(--color-accent);
+  color: var(--color-text-on-accent);
+  border-color: var(--color-accent);
+  font-weight: var(--font-weight-bold);
+}
+
+.filters .chip .count {
+  margin-left: var(--spacing-xs);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+.table-wrap {
+  max-height: 420px;
+  overflow-y: auto;
+  border: var(--border-width-regular) solid var(--color-border);
+  border-radius: var(--border-radius-md);
+}
+
+table.items {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-text-sm-size);
+}
+
+table.items thead th {
+  position: sticky;
+  top: 0;
+  background: var(--color-background-secondary);
+  text-align: left;
+  font-weight: var(--font-weight-bold);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-bottom: var(--border-width-regular) solid var(--color-border);
+}
+
+table.items tbody td {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-bottom: var(--border-width-regular) solid var(--color-border);
+  vertical-align: top;
+}
+
+table.items tbody tr:last-child td {
+  border-bottom: none;
+}
+
+table.items tbody tr.clickable {
+  cursor: pointer;
+}
+
+table.items tbody tr.clickable:hover {
+  background: var(--color-background-secondary);
+}
+
+table.items td.type {
+  font-family: var(--font-mono);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+table.items td.label {
+  word-break: break-word;
+}
+
+table.items td.modified {
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: var(--spacing-sm);
+  gap: var(--spacing-md);
+}
+
+.actions .count-summary {
+  color: var(--color-text-secondary);
+  font-size: var(--font-text-sm-size);
+}
+
+.empty {
+  padding: var(--spacing-lg);
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.error {
+  padding: var(--spacing-md);
+  border-radius: var(--border-radius-md);
+  background: var(--color-background-info);
+  color: var(--color-text-info);
+  font-size: var(--font-text-sm-size);
+}
