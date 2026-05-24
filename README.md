@@ -4,7 +4,7 @@ MCP Apps pilot for Miro. Six tools that return **interactive UI** instead of JSO
 
 Host validation for the rendering path landed in Claude Desktop 24-05-2026 (board-summary card rendered cleanly for a 101-item demo board with bar chart, recent items, and Open-in-Miro CTA).
 
-Companion to the Go [`miro-mcp-server`](https://github.com/olgasafonova/miro-mcp-server) — that one provides 89 CRUD tools for working with Miro programmatically; this one demonstrates the visual pattern. Both can run side-by-side, both reuse the same `MIRO_ACCESS_TOKEN`.
+Sibling to the Go [`miro-mcp-server`](https://github.com/olgasafonova/miro-mcp-server) (92 CRUD tools, agent-driven) and to [`miro-cli`](https://github.com/olgasafonova/miro-cli) (shell-driven, with a local SQLite mirror for offline search). All three sit on the same Miro REST API surface, share the same `MIRO_ACCESS_TOKEN`, and can run side-by-side — pick the runtime that fits the moment. This repo is the **visual** one: tools render UI inline in the chat instead of streaming JSON.
 
 This is the n4o pilot from `claude-code-config-n4o`. See bead for strategic context (Jeff Chow / Kosta Bolgov conversation, "thin use-case packaging + discoverability" gap).
 
@@ -131,10 +131,19 @@ Per beads `miro-mcp-server-n4o` (host validation) and `miro-mcp-server-8c3` (4-t
 3. Document the pattern + lessons learned in `rules/mcp-server-patterns.md`
 4. Optional: pagination for large-board tools, more sophisticated graph layout for `connectors` (force-directed beats raw coordinate-normalization once node count grows)
 
+## Related projects
+
+| Repo | What it does | Runtime |
+|---|---|---|
+| [`miro-cli`](https://github.com/olgasafonova/miro-cli) | Wraps the Miro REST API as shell commands; local SQLite mirror for offline search; bulk-migration verbs | Shell / CI / Makefile |
+| [`miro-mcp-server`](https://github.com/olgasafonova/miro-mcp-server) | 92 CRUD tools for working with Miro programmatically from any MCP client | Go MCP server, stdio/HTTP |
+| **`miro-mcp-apps`** (this repo) | 6 tools that return interactive UI rendered inline in the chat | TypeScript MCP Apps server, stdio/HTTP |
+
+All three sit on the Miro REST API and share `MIRO_ACCESS_TOKEN`.
+
 ## References
 
 - MCP Apps spec: https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/2026-01-26/apps.mdx
 - ext-apps SDK: https://github.com/modelcontextprotocol/ext-apps
 - Example this is adapted from: `modelcontextprotocol/ext-apps/examples/basic-server-vanillajs`
 - Anthropic post: https://claude.com/blog/building-agents-that-reach-production-systems-with-mcp
-- Companion Go server: https://github.com/olgasafonova/miro-mcp-server
