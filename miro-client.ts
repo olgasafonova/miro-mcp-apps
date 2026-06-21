@@ -371,6 +371,43 @@ export interface ConnectorsGraphResult {
   }>;
 }
 
+function collectReferencedIds(connectors: Connector[]): Set<string> {
+  const referencedIds = new Set<string>();
+  for (const c of connectors) {
+    if (c.startItem?.id) referencedIds.add(c.startItem.id);
+    if (c.endItem?.id) referencedIds.add(c.endItem.id);
+  }
+  return referencedIds;
+}
+
+function toGraphNode(item: BoardItem): ConnectorsGraphResult["nodes"][number] {
+  return {
+    id: item.id,
+    type: item.type,
+    label: deriveLabel(item),
+    x: item.position?.x ?? 0,
+    y: item.position?.y ?? 0,
+    width: item.geometry?.width ?? 100,
+    height: item.geometry?.height ?? 100,
+  };
+}
+
+function cleanCaption(captions?: Array<{ content?: string }>): string | undefined {
+  return captions?.[0]?.content
+    ?.replace(/<[^>]+>/g, "")
+    .trim()
+    .slice(0, 40);
+}
+
+function toGraphEdge(c: Connector): ConnectorsGraphResult["edges"][number] {
+  return {
+    id: c.id,
+    from: c.startItem!.id,
+    to: c.endItem!.id,
+    caption: cleanCaption(c.captions),
+  };
+}
+
 export async function buildConnectorsGraph(
   boardId: string,
 ): Promise<ConnectorsGraphResult> {
@@ -380,35 +417,13 @@ export async function buildConnectorsGraph(
     listConnectors(boardId, { limit: 50 }),
   ]);
 
-  const referencedIds = new Set<string>();
-  for (const c of connectors.data) {
-    if (c.startItem?.id) referencedIds.add(c.startItem.id);
-    if (c.endItem?.id) referencedIds.add(c.endItem.id);
-  }
-
+  const referencedIds = collectReferencedIds(connectors.data);
   const nodes = items.data
     .filter((i) => referencedIds.has(i.id))
-    .map((i) => ({
-      id: i.id,
-      type: i.type,
-      label: deriveLabel(i),
-      x: i.position?.x ?? 0,
-      y: i.position?.y ?? 0,
-      width: i.geometry?.width ?? 100,
-      height: i.geometry?.height ?? 100,
-    }));
-
+    .map(toGraphNode);
   const edges = connectors.data
     .filter((c) => c.startItem?.id && c.endItem?.id)
-    .map((c) => ({
-      id: c.id,
-      from: c.startItem!.id,
-      to: c.endItem!.id,
-      caption: c.captions?.[0]?.content
-        ?.replace(/<[^>]+>/g, "")
-        .trim()
-        .slice(0, 40),
-    }));
+    .map(toGraphEdge);
 
   return {
     boardId: board.id,
