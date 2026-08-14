@@ -1,0 +1,77 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>MCP Apps harness</title>
+<style>
+  body { margin: 0; font-family: system-ui; }
+  #bar { padding: 4px 8px; font-size: 12px; background: #eee; color: #333; }
+  #frame { display: block; border: 0; width: 100%; height: calc(100vh - 24px); }
+</style>
+<div id="bar">harness: <span id="status">booting</span> | openLink: <span id="link">none</span></div>
+<iframe id="frame"></iframe>
+<script src="fixtures.js"></script>
+<script>
+  const q = new URLSearchParams(location.search);
+  const view = q.get("view") || "comments";          // comments | recent-boards
+  const fixtureName = q.get("fixture") || "withComments"; // withComments | empty | recent
+  const theme = q.get("theme") || "light";
+  const hostVars = q.get("hostvars") === "on";
+
+  const frame = document.getElementById("frame");
+  const statusEl = document.getElementById("status");
+  const linkEl = document.getElementById("link");
+  frame.src = view + ".html";
+
+  // A deliberately-distinctive host palette so an override is visually
+  // provable against the bundle's own light-dark() fallbacks.
+  // NOTE: the ext-apps schema allows only its own variable vocabulary;
+  // "--color-accent" is not in it, so a host cannot override the brand accent.
+  const HOST_VARS_LIGHT = {
+    "--color-background-info": "#e6f4ea",
+    "--color-text-info": "#137333",
+    "--color-background-primary": "#faf9f5",
+  };
+  const HOST_VARS_DARK = {
+    "--color-background-info": "#0f3d24",
+    "--color-text-info": "#7ee2a8",
+    "--color-background-primary": "#262624",
+  };
+
+  function hostContext() {
+    const ctx = { theme };
+    if (hostVars) {
+      ctx.styles = { variables: theme === "dark" ? HOST_VARS_DARK : HOST_VARS_LIGHT };
+    }
+    return ctx;
+  }
+
+  function send(msg) {
+    frame.contentWindow.postMessage(msg, "*");
+  }
+
+  window.addEventListener("message", (ev) => {
+    const m = ev.data;
+    if (!m || m.jsonrpc !== "2.0") return;
+    if (m.method === "ui/initialize") {
+      send({ jsonrpc: "2.0", id: m.id, result: {
+        protocolVersion: "2026-01-26",
+        hostInfo: { name: "scratch-harness", version: "0.0.1" },
+        hostCapabilities: { openLinks: {} },
+        hostContext: hostContext(),
+      }});
+      statusEl.textContent = "initialized";
+    } else if (m.method === "ui/notifications/initialized") {
+      const data = window.FIXTURES[fixtureName];
+      send({ jsonrpc: "2.0", method: "ui/notifications/tool-result", params: {
+        content: [{ type: "text", text: "harness fixture: " + fixtureName }],
+        structuredContent: data,
+      }});
+      statusEl.textContent = "tool-result sent (" + fixtureName + ", " + theme + (hostVars ? ", hostvars" : "") + ")";
+    } else if (m.method === "ui/open-link") {
+      linkEl.textContent = m.params && m.params.url;
+      send({ jsonrpc: "2.0", id: m.id, result: {} });
+    } else if (m.id !== undefined && m.method) {
+      // Any other request: succeed emptily so the app never hangs.
+      send({ jsonrpc: "2.0", id: m.id, result: {} });
+    }
+  });
+</script>
