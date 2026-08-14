@@ -13,6 +13,7 @@ import path from "node:path";
 import { z } from "zod";
 import {
   buildBoardSummary,
+  buildCommentThreads,
   buildConnectorsGraph,
   buildFrameOverview,
   buildListItems,
@@ -33,6 +34,7 @@ const FRAME_OVERVIEW_URI = "ui://miro-frame-overview/mcp-app.html";
 const STICKY_CLUSTERS_URI = "ui://miro-sticky-clusters/mcp-app.html";
 const RECENT_BOARDS_URI = "ui://miro-recent-boards/mcp-app.html";
 const CONNECTORS_URI = "ui://miro-connectors/mcp-app.html";
+const COMMENTS_URI = "ui://miro-comments/mcp-app.html";
 
 export function createServer(): McpServer {
   const server = new McpServer({
@@ -454,6 +456,90 @@ export function createServer(): McpServer {
       return {
         contents: [
           { uri: CONNECTORS_URI, mimeType: RESOURCE_MIME_TYPE, text: html },
+        ],
+      };
+    },
+  );
+
+  // ---- Tool 7: comment_threads (card list UI) ----
+
+  registerAppTool(
+    server,
+    "miro_comment_threads_app",
+    {
+      title: "Miro Comment Threads (UI)",
+      description:
+        "USE WHEN the user wants to review discussion on a Miro board: which " +
+        "comment threads are open vs resolved, who said what, and the reply " +
+        "history inline. Renders filterable thread cards instead of JSON. " +
+        "Read-only — to post or resolve a comment, use the Go " +
+        "miro-mcp-server's miro_create_comment / miro_resolve_comment. " +
+        "Uses Miro's v2-experimental API, which may be unavailable on some " +
+        "accounts or plans.",
+      inputSchema: {
+        board_id: z.string().describe("Miro board ID"),
+        limit: z
+          .number()
+          .optional()
+          .describe("Max threads to fetch (default 50)"),
+      },
+      // Declare every field: the schema is applied to structuredContent, so an
+      // undeclared key is stripped before the view sees it.
+      outputSchema: z.object({
+        boardId: z.string(),
+        boardName: z.string(),
+        viewLink: z.string(),
+        threads: z.array(
+          z.object({
+            id: z.string(),
+            resolved: z.boolean(),
+            createdAt: z.string().optional(),
+            authorName: z.string().optional(),
+            itemId: z.string().optional(),
+            messages: z.array(
+              z.object({
+                id: z.string(),
+                content: z.string(),
+                authorName: z.string().optional(),
+                createdAt: z.string().optional(),
+              }),
+            ),
+            replyCount: z.number(),
+          }),
+        ),
+        openCount: z.number(),
+        resolvedCount: z.number(),
+        total: z.number(),
+      }),
+      _meta: { ui: { resourceUri: COMMENTS_URI } },
+    },
+    async ({ board_id, limit }): Promise<CallToolResult> => {
+      const result = await buildCommentThreads(board_id, limit ?? 50);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `${result.openCount} open and ${result.resolvedCount} resolved comment threads on "${result.boardName}".`,
+          },
+        ],
+        structuredContent: { ...result },
+      };
+    },
+  );
+
+  registerAppResource(
+    server,
+    COMMENTS_URI,
+    COMMENTS_URI,
+    { mimeType: RESOURCE_MIME_TYPE },
+    async (): Promise<ReadResourceResult> => {
+      const html = await fs.readFile(
+        path.join(DIST_DIR, "comments.html"),
+        "utf-8",
+      );
+      return {
+        contents: [
+          { uri: COMMENTS_URI, mimeType: RESOURCE_MIME_TYPE, text: html },
         ],
       };
     },

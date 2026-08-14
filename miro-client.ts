@@ -5,6 +5,11 @@
 
 const MIRO_API_BASE = "https://api.miro.com/v2";
 
+// Comments live only on v2-experimental. The endpoints are live but absent from
+// Miro's OpenAPI spec — confirmed by live probe from the Go server on
+// 13-08-2026 — so spec absence is not evidence they do not exist.
+const MIRO_API_EXPERIMENTAL_BASE = "https://api.miro.com/v2-experimental";
+
 function getToken(): string {
   const token = process.env.MIRO_ACCESS_TOKEN;
   if (!token) {
@@ -16,8 +21,11 @@ function getToken(): string {
   return token;
 }
 
-async function miroFetch<T>(path: string): Promise<T> {
-  const res = await fetch(`${MIRO_API_BASE}${path}`, {
+async function miroFetch<T>(
+  path: string,
+  base: string = MIRO_API_BASE,
+): Promise<T> {
+  const res = await fetch(`${base}${path}`, {
     headers: {
       Authorization: `Bearer ${getToken()}`,
       Accept: "application/json",
@@ -25,8 +33,17 @@ async function miroFetch<T>(path: string): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
+    // 403 and 404 are ambiguous on the experimental API: they mean either a
+    // genuinely missing board or that the account/plan has no access to the
+    // experimental surface at all. Say so, rather than leave the caller
+    // hunting a board ID that was never the problem.
+    const hint =
+      base === MIRO_API_EXPERIMENTAL_BASE &&
+      (res.status === 403 || res.status === 404)
+        ? " (this is a v2-experimental endpoint and may be unavailable for your account or plan)"
+        : "";
     throw new Error(
-      `Miro API ${res.status} ${res.statusText} for ${path}: ${body.slice(0, 200)}`,
+      `Miro API ${res.status} ${res.statusText} for ${path}${hint}: ${body.slice(0, 200)}`,
     );
   }
   return (await res.json()) as T;
@@ -457,5 +474,145 @@ export async function buildConnectorsGraph(
     viewLink: board.viewLink,
     nodes,
     edges,
+  };
+}
+
+// ---- Tool 7: comment threads ----
+
+/**
+ * Wire shape of a comment thread. A "comment" in this API is a THREAD, not a
+ * single message: the text lives in messages[], and the first message is the
+ * one that opened it.
+ *
+ * position.type is "attached" when the thread is anchored to an item, in which
+ * case itemId names it. Threads created without an item land unanchored — the
+ * API accepts x/y on create and then ignores them, per the Go server's live
+ * probe, so an unanchored thread has no meaningful location to show.
+ */
+interface ApiCommentThread {
+  id: string;
+  resolved?: boolean;
+  createdAt?: string;
+  createdBy?: { id: string; name?: string };
+  position?: { type?: string; itemId?: string };
+  messages?: Array<{
+    id: string;
+    content?: string;
+    createdAt?: string;
+    createdBy?: { id: string; name?: string };
+  }>;
+}
+
+interface CommentsResponse {
+  data: ApiCommentThread[];
+  total?: number;
+  offset?: number;
+  size?: number;
+}
+
+export interface CommentMessageView {
+  id: string;
+  content: string;
+  authorName?: string;
+  createdAt?: string;
+}
+
+export interface CommentThreadView {
+  id: string;
+  resolved: boolean;
+  createdAt?: string;
+  authorName?: string;
+  /** Set only when the thread is anchored to a board item. */
+  itemId?: string;
+  messages: CommentMessageView[];
+  replyCount: number;
+}
+
+export interface CommentThreadsResult {
+  boardId: string;
+  boardName: string;
+  viewLink: string;
+  threads: CommentThreadView[];
+  openCount: number;
+  resolvedCount: number;
+  /** Total the API reports, which may exceed the threads fetched. */
+  total: number;
+}
+
+export async function listComments(
+  boardId: string,
+  limit: number = 50,
+): Promise<CommentsResponse> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return miroFetch<CommentsResponse>(
+    `/boards/${encodeURIComponent(boardId)}/comments?${params.toString()}`,
+    MIRO_API_EXPERIMENTAL_BASE,
+  );
+}
+
+/**
+ * Strips the HTML Miro returns in comment content down to plain text.
+ *
+ * The view sets every string via textContent, so this is not the security
+ * boundary — it is here so a comment reads as prose rather than as markup.
+ * Mirrors the same treatment connector captions already get above.
+ */
+function stripHtml(html: string | undefined): string {
+  if (!html) return "";
+  return html
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export async function buildCommentThreads(
+  boardId: string,
+  limit: number = 50,
+): Promise<CommentThreadsResult> {
+  const [board, comments] = await Promise.all([
+    getBoard(boardId),
+    listComments(boardId, limit),
+  ]);
+
+  const threads: CommentThreadView[] = comments.data.map((t) => {
+    const messages = (t.messages ?? []).map((m) => ({
+      id: m.id,
+      content: stripHtml(m.content),
+      authorName: m.createdBy?.name,
+      createdAt: m.createdAt,
+    }));
+    return {
+      id: t.id,
+      resolved: t.resolved === true,
+      createdAt: t.createdAt,
+      authorName: t.createdBy?.name,
+      // Only an "attached" thread has an item; anything else is unanchored
+      // and has no location worth showing.
+      itemId:
+        t.position?.type === "attached" ? t.position?.itemId : undefined,
+      messages,
+      // The opening message is not a reply, so a thread with one message has
+      // zero replies rather than one.
+      replyCount: Math.max(0, messages.length - 1),
+    };
+  });
+
+  const resolvedCount = threads.filter((t) => t.resolved).length;
+
+  return {
+    boardId: board.id,
+    boardName: board.name,
+    viewLink: board.viewLink,
+    threads,
+    openCount: threads.length - resolvedCount,
+    resolvedCount,
+    total: comments.total ?? threads.length,
   };
 }

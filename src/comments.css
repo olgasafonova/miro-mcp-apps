@@ -1,0 +1,195 @@
+.app {
+  max-width: 640px;
+  padding: var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.header h1 {
+  word-break: break-word;
+}
+
+.subtitle {
+  color: var(--color-text-secondary);
+  font-size: var(--font-text-sm-size);
+  margin: 0;
+}
+
+/* Filter chips match list-items exactly, so the two views feel like one app. */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs);
+}
+
+.filters .chip {
+  padding: 2px var(--spacing-sm);
+  border-radius: 999px;
+  background: var(--color-background-secondary);
+  border: var(--border-width-regular) solid var(--color-border);
+  color: var(--color-text-primary);
+  font-size: var(--font-text-sm-size);
+  cursor: pointer;
+  font-weight: var(--font-weight-normal);
+}
+
+.filters .chip[aria-pressed="true"] {
+  background: var(--color-accent);
+  color: var(--color-text-on-accent);
+  border-color: var(--color-accent);
+  font-weight: var(--font-weight-bold);
+}
+
+.filters .chip .count {
+  margin-left: var(--spacing-xs);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+/* Threads are cards rather than table rows: a thread is a variable-length
+   conversation, and a row would force every reply onto one line. */
+.threads {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  max-height: 460px;
+  overflow-y: auto;
+}
+
+.thread {
+  border: var(--border-width-regular) solid var(--color-border);
+  border-radius: var(--border-radius-md);
+  padding: var(--spacing-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.thread.clickable {
+  cursor: pointer;
+}
+
+.thread.clickable:hover {
+  background: var(--color-background-secondary);
+}
+
+/* Resolved threads recede rather than disappear: still readable when the
+   filter asks for them, never competing with open ones in the All tab. */
+.thread.resolved {
+  opacity: 0.65;
+}
+
+.thread-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: var(--font-text-sm-size);
+}
+
+.thread-head .status {
+  padding: 1px var(--spacing-xs);
+  border-radius: var(--border-radius-sm);
+  font-weight: var(--font-weight-bold);
+}
+
+/* Status uses the host's semantic colors rather than raw hex, so it stays
+   legible in whatever theme the host applies. */
+.thread-head .status.open {
+  background: var(--color-background-info);
+  color: var(--color-text-info);
+}
+
+.thread-head .status.resolved {
+  background: var(--color-background-secondary);
+  color: var(--color-text-secondary);
+}
+
+.thread-head .anchor,
+.thread-head .reply-count {
+  color: var(--color-text-secondary);
+}
+
+.thread-head .anchor {
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+.message {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Replies are indented and ruled, so the opening message stays identifiable
+   as the one that started the thread. */
+.message.reply {
+  margin-left: var(--spacing-sm);
+  padding-left: var(--spacing-sm);
+  border-left: var(--border-width-regular) solid var(--color-border);
+}
+
+.message-meta {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs);
+  font-size: var(--font-text-sm-size);
+  color: var(--color-text-secondary);
+}
+
+.message-meta .author {
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.message-meta .when {
+  font-variant-numeric: tabular-nums;
+}
+
+.message-body {
+  margin: 0;
+  font-size: var(--font-text-sm-size);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.message-body.empty {
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: var(--spacing-sm);
+  gap: var(--spacing-md);
+}
+
+.actions .count-summary {
+  color: var(--color-text-secondary);
+  font-size: var(--font-text-sm-size);
+}
+
+.empty {
+  padding: var(--spacing-lg);
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.error {
+  padding: var(--spacing-md);
+  border-radius: var(--border-radius-md);
+  background: var(--color-background-info);
+  color: var(--color-text-info);
+  font-size: var(--font-text-sm-size);
+}
