@@ -34,6 +34,18 @@ async function miroFetch<T>(path: string): Promise<T> {
 
 // ---- Types: minimal subset of Miro REST API responses ----
 
+/** A Miro user reference, as returned on a board's owner. */
+export interface BoardUser {
+  id: string;
+  name?: string;
+}
+
+/** The team a board belongs to. */
+export interface BoardTeam {
+  id: string;
+  name?: string;
+}
+
 export interface Board {
   id: string;
   name: string;
@@ -41,6 +53,10 @@ export interface Board {
   viewLink: string;
   modifiedAt?: string;
   createdAt?: string;
+  // GET /v2/boards returns these on every board in the page, so surfacing them
+  // costs no extra request. They were simply absent from this projection.
+  owner?: BoardUser;
+  team?: BoardTeam;
 }
 
 export interface BoardItem {
@@ -329,6 +345,9 @@ export interface RecentBoardsResult {
     viewLink: string;
     modifiedAt?: string;
     createdAt?: string;
+    ownerName?: string;
+    teamId?: string;
+    teamName?: string;
   }>;
 }
 
@@ -344,6 +363,13 @@ export async function buildRecentBoards(
       viewLink: b.viewLink,
       modifiedAt: b.modifiedAt,
       createdAt: b.createdAt,
+      // Flattened rather than nested: the view renders owner and team as
+      // chips, and a nested object would make it walk two levels for one
+      // string. Absent values stay undefined rather than becoming "", so the
+      // view branches on presence instead of on emptiness.
+      ownerName: b.owner?.name,
+      teamId: b.team?.id,
+      teamName: b.team?.name,
     })),
   };
 }

@@ -324,14 +324,18 @@ export function createServer(): McpServer {
       description:
         "USE WHEN the user wants to browse their most-recently-modified Miro " +
         "boards interactively (no board ID needed). Renders a clickable table " +
-        "of boards sorted by last-modified. Returns the rendered table " +
-        "instead of JSON.",
+        "of boards sorted by last-modified, each showing its owner and team. " +
+        "Returns the rendered table instead of JSON.",
       inputSchema: {
         limit: z
           .number()
           .optional()
           .describe("Max boards to show (default 20, max 50)"),
       },
+      // Every field must be declared here: the schema is applied to
+      // structuredContent, so an undeclared key is stripped before the view
+      // ever sees it. Adding a field to buildRecentBoards without adding it
+      // here fails silently, as "the UI just doesn't show it".
       outputSchema: z.object({
         boards: z.array(
           z.object({
@@ -341,6 +345,9 @@ export function createServer(): McpServer {
             viewLink: z.string(),
             modifiedAt: z.string().optional(),
             createdAt: z.string().optional(),
+            ownerName: z.string().optional(),
+            teamId: z.string().optional(),
+            teamName: z.string().optional(),
           }),
         ),
       }),
