@@ -20,6 +20,9 @@ interface RecentBoard {
   viewLink: string;
   modifiedAt?: string;
   createdAt?: string;
+  ownerName?: string;
+  teamId?: string;
+  teamName?: string;
 }
 
 interface RecentBoardsResult {
@@ -32,8 +35,7 @@ const tbodyEl = document.getElementById("boards-tbody")!;
 
 function extractData(result: CallToolResult): RecentBoardsResult | null {
   const sc = result.structuredContent as
-    | Partial<RecentBoardsResult>
-    | undefined;
+    Partial<RecentBoardsResult> | undefined;
   if (!sc || !Array.isArray(sc.boards)) return null;
   return sc as RecentBoardsResult;
 }
@@ -49,6 +51,36 @@ function formatDate(iso?: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+/**
+ * Builds the owner/team chip row shown under a board's name, or null when the
+ * board carries neither.
+ *
+ * Absent values are omitted rather than rendered as a placeholder: a personal
+ * board genuinely has no team, and an "—" chip would read as missing data
+ * instead of as "not applicable". The date column already uses "—" because a
+ * board always HAS a modified date, so a blank there really would be a gap.
+ */
+function buildMetaChips(board: RecentBoard): HTMLElement | null {
+  const labels: string[] = [];
+  if (board.ownerName) labels.push(board.ownerName);
+  // Fall back to the team ID only when the name is missing but the board does
+  // belong to a team — better a raw ID than silently dropping the association.
+  if (board.teamName) labels.push(board.teamName);
+  else if (board.teamId) labels.push(`Team ${board.teamId}`);
+
+  if (labels.length === 0) return null;
+
+  const row = document.createElement("p");
+  row.className = "board-meta";
+  for (const label of labels) {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.textContent = label;
+    row.appendChild(chip);
+  }
+  return row;
 }
 
 function renderTable(boards: RecentBoard[]) {
@@ -86,6 +118,8 @@ function renderTable(boards: RecentBoard[]) {
       desc.textContent = board.description;
       tName.appendChild(desc);
     }
+    const meta = buildMetaChips(board);
+    if (meta) tName.appendChild(meta);
     const tMod = document.createElement("td");
     tMod.className = "modified";
     tMod.textContent = formatDate(board.modifiedAt);
