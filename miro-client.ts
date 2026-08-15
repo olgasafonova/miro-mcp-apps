@@ -88,8 +88,9 @@ export interface BoardItem {
     fillColor?: string;
     borderColor?: string;
   };
-  position?: { x: number; y: number };
+  position?: { x: number; y: number; relativeTo?: string };
   geometry?: { width?: number; height?: number };
+  parent?: { id?: string };
   modifiedAt?: string;
   links?: { self?: string };
 }
@@ -952,9 +953,9 @@ function pushShapeRect(
     fillOpacity: asNumber(style.fillOpacity, 1),
     stroke: isSticky
       ? "none"
-      : (resolvePaint(style.borderColor) ?? (isFrame ? "#999999" : "#1a1a1a")),
+      : (resolvePaint(style.borderColor) ?? (isFrame ? "#c8c8c8" : "#1a1a1a")),
     strokeWidth: asNumber(style.borderWidth, isFrame ? 1 : 2),
-    strokeStyle: isFrame ? "dashed" : (style.borderStyle ?? "normal"),
+    strokeStyle: isFrame ? "normal" : (style.borderStyle ?? "normal"),
   });
 }
 
@@ -1082,7 +1083,33 @@ export async function buildBoardSvg(
     // v2 connectors listing failed; render items without edges.
   }
 
-  const byId = new Map(itemsPage.items.map((i) => [i.id, i]));
+  // Items inside a frame carry positions relative to the frame's TOP-LEFT
+  // (position.relativeTo == "parent_top_left"), not to the canvas center.
+  // Resolve everything to canvas-absolute before rendering, or frame
+  // children cluster near the canvas origin while their frames sit empty —
+  // the exact defect the first side-by-side with the real board showed.
+  const frameTopLeft = new Map<string, { x: number; y: number }>();
+  for (const it of itemsPage.items) {
+    if (it.type !== "frame") continue;
+    frameTopLeft.set(it.id, {
+      x: (it.position?.x ?? 0) - (it.geometry?.width ?? 0) / 2,
+      y: (it.position?.y ?? 0) - (it.geometry?.height ?? 0) / 2,
+    });
+  }
+  const absItems = itemsPage.items.map((it) => {
+    const tl = it.parent?.id ? frameTopLeft.get(it.parent.id) : undefined;
+    if (!tl || it.position?.relativeTo !== "parent_top_left") return it;
+    return {
+      ...it,
+      position: {
+        ...it.position,
+        x: tl.x + (it.position?.x ?? 0),
+        y: tl.y + (it.position?.y ?? 0),
+      },
+    };
+  });
+
+  const byId = new Map(absItems.map((i) => [i.id, i]));
   const acc: SvgAccumulator = {
     rects: [],
     ellipses: [],
@@ -1095,7 +1122,7 @@ export async function buildBoardSvg(
   let rendered = 0;
   let skipped = 0;
   for (const framesPass of [true, false]) {
-    for (const item of itemsPage.items) {
+    for (const item of absItems) {
       if ((item.type === "frame") !== framesPass) continue;
       if (renderSvgItem(acc, item)) rendered++;
       else skipped++;
