@@ -1,10 +1,11 @@
 /**
  * Miro board-SVG UI. Receives BoardSvgResult — render primitives (rects,
  * ellipses, lines, labels) in Miro board coordinates plus a fitted viewBox —
- * and draws them as an inline SVG spatial map. The geometry was computed
- * server-side (TS port of the Go server's svg_read.go); this file only turns
- * primitives into DOM nodes. Everything is created via createElementNS and
- * textContent — no markup injection.
+ * and draws them as an inline SVG spatial map with drag-to-pan and
+ * scroll-to-zoom. The geometry was computed server-side (TS port of the Go
+ * server's svg_read.go); this file only turns primitives into DOM nodes.
+ * Everything is created via createElementNS and textContent — no markup
+ * injection.
  */
 import {
   App,
@@ -57,11 +58,18 @@ interface SvgLabel {
   onFill: boolean;
 }
 
+interface ViewBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 interface BoardSvgResult {
   boardId: string;
   boardName: string;
   viewLink: string;
-  viewBox: { x: number; y: number; width: number; height: number };
+  viewBox: ViewBox;
   rects: SvgRect[];
   ellipses: SvgEllipse[];
   lines: SvgLine[];
@@ -73,17 +81,27 @@ interface BoardSvgResult {
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
+const MIN_CANVAS_PX = 280;
+const MAX_CANVAS_PX = 620;
+const ZOOM_STEP = 1.15;
+const MAX_ZOOM_IN = 20; // viewBox may shrink to 1/20 of the fitted width
+const MAX_ZOOM_OUT = 3; // and grow to 3x of it
 
 const appEl = document.getElementById("app")!;
 const boardNameEl = document.getElementById("board-name")!;
 const subtitleEl = document.getElementById("subtitle")!;
 const svgEl = document.getElementById("canvas") as unknown as SVGSVGElement;
 const countSummaryEl = document.getElementById("count-summary")!;
+const fitBtn = document.getElementById("fit-btn") as HTMLButtonElement;
 const openBoardBtn = document.getElementById(
   "open-board-btn",
 ) as HTMLButtonElement;
 
 let currentData: BoardSvgResult | null = null;
+let vb: ViewBox | null = null;
+let staticLayer: SVGGElement | null = null;
+let dynamicLayer: SVGGElement | null = null;
+let dynamicRedraw: number | null = null;
 
 function isBoardSvgResult(
   sc: Partial<BoardSvgResult> | undefined,
@@ -120,29 +138,55 @@ function updateHeader(data: BoardSvgResult) {
     (data.skipped > 0 ? ` · ${data.skipped} skipped (no geometry)` : "") +
     (data.lines.length > 0
       ? ` · ${data.lines.length} connector${plural(data.lines.length)}`
-      : "");
+      : "") +
+    " · drag to pan, scroll to zoom";
   countSummaryEl.textContent = data.truncated
     ? `Showing the first ${data.rendered} of ${data.totalItems} items.`
     : data.totalItems === 0
       ? "Board has no items."
       : `All ${data.totalItems} board item${plural(data.totalItems)} fetched.`;
   openBoardBtn.disabled = !data.viewLink;
+  fitBtn.disabled = false;
 }
 
-function resetSvg(viewBox: BoardSvgResult["viewBox"]) {
-  while (svgEl.firstChild) svgEl.removeChild(svgEl.firstChild);
-  svgEl.setAttribute(
-    "viewBox",
-    `${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`,
+/** How many board units one CSS pixel covers at the current viewBox. */
+function unitsPerPixel(): number {
+  const box = svgEl.getBoundingClientRect();
+  const pxW = box.width || 688;
+  const pxH = box.height || 440;
+  return Math.max(vb!.width / pxW, vb!.height / pxH, 0.0001);
+}
+
+/**
+ * The canvas takes the board's own aspect ratio (clamped) instead of a fixed
+ * height — a wide flat board in a fixed tall box letterboxes into two big
+ * empty bands, which is most of what made the first Desktop render ugly.
+ */
+function sizeCanvas(dataVb: ViewBox) {
+  const width = svgEl.getBoundingClientRect().width || 688;
+  const height = Math.min(
+    MAX_CANVAS_PX,
+    Math.max(MIN_CANVAS_PX, (width * dataVb.height) / dataVb.width),
   );
-  svgEl.setAttribute("preserveAspectRatio", "xMidYMid meet");
+  svgEl.style.height = `${Math.round(height)}px`;
 }
 
-function appendEmptyText(viewBox: BoardSvgResult["viewBox"], message: string) {
+function applyViewBox() {
+  svgEl.setAttribute("viewBox", `${vb!.x} ${vb!.y} ${vb!.width} ${vb!.height}`);
+  svgEl.setAttribute("preserveAspectRatio", "xMidYMid meet");
+  if (dynamicRedraw === null) {
+    dynamicRedraw = requestAnimationFrame(() => {
+      dynamicRedraw = null;
+      renderDynamicLayer();
+    });
+  }
+}
+
+function appendEmptyText(box: ViewBox, message: string) {
   const text = document.createElementNS(SVG_NS, "text");
   setAttrs(text, {
-    x: viewBox.x + viewBox.width / 2,
-    y: viewBox.y + viewBox.height / 2,
+    x: box.x + box.width / 2,
+    y: box.y + box.height / 2,
     "text-anchor": "middle",
     class: "empty-text",
   });
@@ -150,21 +194,7 @@ function appendEmptyText(viewBox: BoardSvgResult["viewBox"], message: string) {
   svgEl.appendChild(text);
 }
 
-/**
- * Board coordinates span thousands of units, so a label's fontSize (meant as
- * an on-screen pixel size) must be scaled into board units or it renders
- * microscopic. unitsPerPixel is how many board units one CSS pixel covers
- * once the viewBox is fitted into the on-screen box.
- */
-function computeUnitsPerPixel(viewBox: BoardSvgResult["viewBox"]): number {
-  const box = svgEl.getBoundingClientRect();
-  const pxW = box.width || 688;
-  const pxH = box.height || 440;
-  // preserveAspectRatio "meet" scales by the tighter dimension.
-  return Math.max(viewBox.width / pxW, viewBox.height / pxH, 0.0001);
-}
-
-function appendRect(r: SvgRect) {
+function appendRect(parent: SVGGElement, r: SvgRect) {
   const rect = document.createElementNS(SVG_NS, "rect");
   setAttrs(rect, {
     x: r.x,
@@ -177,10 +207,10 @@ function appendRect(r: SvgRect) {
     "data-miro-type": r.itemType,
   });
   if (r.rx > 0) rect.setAttribute("rx", String(r.rx));
-  svgEl.appendChild(rect);
+  parent.appendChild(rect);
 }
 
-function appendEllipse(e: SvgEllipse) {
+function appendEllipse(parent: SVGGElement, e: SvgEllipse) {
   const ellipse = document.createElementNS(SVG_NS, "ellipse");
   setAttrs(ellipse, {
     cx: e.cx,
@@ -192,10 +222,10 @@ function appendEllipse(e: SvgEllipse) {
     "data-miro-id": e.id,
     "data-miro-type": "shape",
   });
-  svgEl.appendChild(ellipse);
+  parent.appendChild(ellipse);
 }
 
-function appendLine(l: SvgLine) {
+function appendLine(parent: SVGGElement, l: SvgLine) {
   const line = document.createElementNS(SVG_NS, "line");
   setAttrs(line, {
     x1: l.x1,
@@ -206,7 +236,7 @@ function appendLine(l: SvgLine) {
     "data-miro-id": l.id,
     "data-miro-type": "connector",
   });
-  svgEl.appendChild(line);
+  parent.appendChild(line);
 }
 
 /** Rough advance width of a glyph as a fraction of the font size. */
@@ -214,53 +244,155 @@ const GLYPH_WIDTH_FACTOR = 0.62;
 
 /**
  * A label earns its place only when it fits its item at the current zoom.
- * Labels render at a fixed on-screen size (fontSize is meant in pixels), so
- * on a dense board an unconditional draw degenerates into overlapping noise —
- * the first harness pass proved it. maxWidth is the item's width in board
- * units; 0 means always draw (frame titles, connector captions).
+ * Labels render at a fixed on-screen size, so on a dense board an
+ * unconditional draw degenerates into overlapping noise. maxWidth is the
+ * item's width in board units; 0 means always draw (frame titles, connector
+ * captions). Zooming in makes more labels fit — the dynamic layer redraws on
+ * every viewBox change.
  */
-function labelFits(l: SvgLabel, unitsPerPixel: number): boolean {
+function labelFits(l: SvgLabel, upp: number): boolean {
   if (l.maxWidth <= 0) return true;
-  const labelUnits =
-    l.text.length * l.fontSize * GLYPH_WIDTH_FACTOR * unitsPerPixel;
-  return labelUnits <= l.maxWidth;
+  return l.text.length * l.fontSize * GLYPH_WIDTH_FACTOR * upp <= l.maxWidth;
 }
 
-function appendLabel(l: SvgLabel, unitsPerPixel: number) {
+function appendLabel(parent: SVGGElement, l: SvgLabel, upp: number) {
   const text = document.createElementNS(SVG_NS, "text");
   setAttrs(text, {
     x: l.x,
     y: l.y,
     "text-anchor": l.anchor,
-    "font-size": l.fontSize * unitsPerPixel,
+    "font-size": l.fontSize * upp,
     class:
       "item-label" + (l.muted ? " muted" : "") + (l.onFill ? " on-fill" : ""),
   });
   text.textContent = l.text;
-  svgEl.appendChild(text);
+  parent.appendChild(text);
+}
+
+/**
+ * A standalone text item whose label is hidden at this zoom leaves a truly
+ * blank region — unlike a box label, there is no shape underneath. Mark the
+ * spot with a faint ghost so text-dense areas read as occupied.
+ */
+function appendTextGhost(parent: SVGGElement, l: SvgLabel) {
+  const rect = document.createElementNS(SVG_NS, "rect");
+  setAttrs(rect, {
+    x: l.x - l.maxWidth / 2,
+    y: l.y - 10,
+    width: l.maxWidth,
+    height: 20,
+    class: "text-ghost",
+  });
+  parent.appendChild(rect);
+}
+
+function renderDynamicLayer() {
+  if (!currentData || !dynamicLayer) return;
+  while (dynamicLayer.firstChild)
+    dynamicLayer.removeChild(dynamicLayer.firstChild);
+  const upp = unitsPerPixel();
+  for (const l of currentData.labels) {
+    if (labelFits(l, upp)) {
+      appendLabel(dynamicLayer, l, upp);
+    } else if (!l.onFill && l.maxWidth > 0) {
+      appendTextGhost(dynamicLayer, l);
+    }
+  }
 }
 
 function render(data: BoardSvgResult) {
   currentData = data;
+  vb = { ...data.viewBox };
   updateHeader(data);
-  resetSvg(data.viewBox);
+
+  while (svgEl.firstChild) svgEl.removeChild(svgEl.firstChild);
+  sizeCanvas(data.viewBox);
 
   if (data.rendered === 0 && data.lines.length === 0) {
+    applyViewBox();
     appendEmptyText(data.viewBox, "No renderable items on this board.");
     return;
   }
 
-  const unitsPerPixel = computeUnitsPerPixel(data.viewBox);
+  staticLayer = document.createElementNS(SVG_NS, "g");
+  dynamicLayer = document.createElementNS(SVG_NS, "g");
+  svgEl.append(staticLayer, dynamicLayer);
 
   // Draw order: rects arrive frames-first from the builder, so frames sit
   // under everything; connectors go above shapes, labels on top.
-  for (const r of data.rects) appendRect(r);
-  for (const e of data.ellipses) appendEllipse(e);
-  for (const l of data.lines) appendLine(l);
-  for (const l of data.labels) {
-    if (labelFits(l, unitsPerPixel)) appendLabel(l, unitsPerPixel);
-  }
+  for (const r of data.rects) appendRect(staticLayer, r);
+  for (const e of data.ellipses) appendEllipse(staticLayer, e);
+  for (const l of data.lines) appendLine(staticLayer, l);
+  applyViewBox();
 }
+
+// ---- Pan and zoom ----
+
+function pointerToBoard(evt: { clientX: number; clientY: number }): {
+  bx: number;
+  by: number;
+} {
+  const box = svgEl.getBoundingClientRect();
+  return {
+    bx: vb!.x + ((evt.clientX - box.left) / box.width) * vb!.width,
+    by: vb!.y + ((evt.clientY - box.top) / box.height) * vb!.height,
+  };
+}
+
+svgEl.addEventListener(
+  "wheel",
+  (e: WheelEvent) => {
+    if (!vb || !currentData) return;
+    e.preventDefault();
+    const factor = e.deltaY > 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+    const fitted = currentData.viewBox;
+    const newW = vb.width * factor;
+    if (newW < fitted.width / MAX_ZOOM_IN || newW > fitted.width * MAX_ZOOM_OUT)
+      return;
+    const { bx, by } = pointerToBoard(e);
+    // Keep the board point under the cursor fixed while scaling.
+    vb.x = bx - (bx - vb.x) * factor;
+    vb.y = by - (by - vb.y) * factor;
+    vb.width *= factor;
+    vb.height *= factor;
+    applyViewBox();
+  },
+  { passive: false },
+);
+
+let panning = false;
+let lastPx = { x: 0, y: 0 };
+
+svgEl.addEventListener("pointerdown", (e: PointerEvent) => {
+  if (!vb) return;
+  panning = true;
+  lastPx = { x: e.clientX, y: e.clientY };
+  svgEl.setPointerCapture(e.pointerId);
+  svgEl.classList.add("panning");
+});
+
+svgEl.addEventListener("pointermove", (e: PointerEvent) => {
+  if (!panning || !vb) return;
+  const box = svgEl.getBoundingClientRect();
+  vb.x -= ((e.clientX - lastPx.x) / box.width) * vb.width;
+  vb.y -= ((e.clientY - lastPx.y) / box.height) * vb.height;
+  lastPx = { x: e.clientX, y: e.clientY };
+  applyViewBox();
+});
+
+svgEl.addEventListener("pointerup", (e: PointerEvent) => {
+  panning = false;
+  svgEl.releasePointerCapture(e.pointerId);
+  svgEl.classList.remove("panning");
+});
+
+fitBtn.addEventListener("click", () => {
+  if (!currentData) return;
+  vb = { ...currentData.viewBox };
+  applyViewBox();
+});
+
+// ---- Errors, host context, wiring ----
 
 function renderError(message: string) {
   appEl.replaceChildren();
@@ -300,17 +432,14 @@ app.onerror = (e) => {
 
 app.onhostcontextchanged = handleHostContextChanged;
 
-const openBoard = async () => {
+openBoardBtn.addEventListener("click", async () => {
   if (!currentData?.viewLink) return;
   try {
     await app.openLink({ url: currentData.viewLink });
   } catch (e) {
     console.error("Open link failed:", e);
   }
-};
-
-openBoardBtn.addEventListener("click", openBoard);
-svgEl.addEventListener("click", openBoard);
+});
 
 app.connect().then(() => {
   const ctx = app.getHostContext();

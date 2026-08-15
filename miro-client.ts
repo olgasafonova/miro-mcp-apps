@@ -781,18 +781,26 @@ function svgRenderable(item: BoardItem): boolean {
   return (w > 0 && h > 0) || item.type === "text";
 }
 
+/**
+ * Per-type default fills for items that carry no explicit color. Without
+ * this, every shape, card, image and document renders the same flat gray and
+ * the map reads as a sea of indistinguishable boxes (first Desktop pass).
+ */
+const TYPE_FILL: Record<string, string> = {
+  sticky_note: "#fff9b1", // Miro's default yellow
+  shape: "#dbeafe",
+  card: "#e0e7ff",
+  app_card: "#ede9fe",
+  image: "#dcfce7",
+  document: "#ffedd5",
+};
+
 function svgFill(item: BoardItem): string {
   const c = item.style?.fillColor ?? "";
   if (/^#[0-9a-fA-F]{3,8}$/.test(c)) return c;
   if (c && NAMED_FILL[c]) return NAMED_FILL[c];
-  switch (item.type) {
-    case "sticky_note":
-      return "#fff9b1"; // Miro's default yellow
-    case "frame":
-      return "none";
-    default:
-      return "#e6e6e6";
-  }
+  if (item.type === "frame") return "none";
+  return TYPE_FILL[item.type] ?? "#e6e6e6";
 }
 
 function svgLabelText(content: string | undefined): string {
