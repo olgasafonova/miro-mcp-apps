@@ -83,6 +83,7 @@ export interface BoardItem {
     content?: string;
     title?: string;
     shape?: string;
+    imageUrl?: string;
   };
   style?: {
     fillColor?: string;
@@ -724,6 +725,16 @@ export interface SvgLabel {
   color: string;
 }
 
+export interface SvgImage {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** data: URI with the image preview bits, fetched server-side. */
+  href: string;
+}
+
 export interface BoardSvgResult {
   boardId: string;
   boardName: string;
@@ -734,6 +745,7 @@ export interface BoardSvgResult {
   ellipses: SvgEllipse[];
   lines: SvgLine[];
   labels: SvgLabel[];
+  images: SvgImage[];
   rendered: number;
   skipped: number;
   totalItems: number;
@@ -887,6 +899,74 @@ function itemLabel(
   };
 }
 
+// Image embedding: structuredContent reaches the model's context as well as
+// the view, so image bits get a hard budget — preview format only, capped
+// per image and in total. Anything over budget (or unfetchable, like the
+// template-cloned items whose imageUrl carries resource id 0) falls back to
+// the placeholder glyph.
+const MAX_EMBED_IMAGES = 20;
+const MAX_IMAGE_BYTES = 200_000;
+const MAX_TOTAL_IMAGE_BYTES = 1_500_000;
+const IMAGE_FETCH_BATCH = 6;
+
+async function fetchImageDataUri(imageUrl: string): Promise<string | null> {
+  try {
+    // Known-broken: template-cloned images carry resource id 0, which the
+    // API rejects with 400 (probed 15-08-2026).
+    if (imageUrl.includes("/resources/images/0?")) return null;
+    const res = await fetch(imageUrl, {
+      headers: { Authorization: `Bearer ${getToken()}` },
+    });
+    if (!res.ok) return null;
+    const ct = res.headers.get("content-type") ?? "";
+    let bytes: ArrayBuffer;
+    let mime = ct;
+    if (ct.includes("application/json")) {
+      // redirect=false form: a JSON doc with a signed, time-limited CDN URL.
+      const doc = (await res.json()) as { url?: string };
+      if (!doc.url) return null;
+      const cdn = await fetch(doc.url);
+      if (!cdn.ok) return null;
+      mime = cdn.headers.get("content-type") ?? "image/png";
+      bytes = await cdn.arrayBuffer();
+    } else {
+      bytes = await res.arrayBuffer();
+    }
+    if (bytes.byteLength === 0 || bytes.byteLength > MAX_IMAGE_BYTES)
+      return null;
+    return `data:${mime};base64,${Buffer.from(bytes).toString("base64")}`;
+  } catch {
+    return null;
+  }
+}
+
+/** Fetches previews for up to MAX_EMBED_IMAGES image items, in small
+ * batches, stopping when the total budget is spent. */
+async function fetchImageHrefs(
+  items: BoardItem[],
+): Promise<Map<string, string>> {
+  const candidates = items
+    .filter((it) => it.type === "image" && it.data?.imageUrl)
+    .slice(0, MAX_EMBED_IMAGES);
+  const hrefs = new Map<string, string>();
+  let spent = 0;
+  for (let i = 0; i < candidates.length; i += IMAGE_FETCH_BATCH) {
+    if (spent >= MAX_TOTAL_IMAGE_BYTES) break;
+    const batch = candidates.slice(i, i + IMAGE_FETCH_BATCH);
+    const results = await Promise.all(
+      batch.map((it) => fetchImageDataUri(it.data!.imageUrl!)),
+    );
+    for (let j = 0; j < batch.length; j++) {
+      const uri = results[j];
+      if (!uri) continue;
+      if (spent + uri.length > MAX_TOTAL_IMAGE_BYTES) continue;
+      spent += uri.length;
+      hrefs.set(batch[j].id, uri);
+    }
+  }
+  return hrefs;
+}
+
 class SvgBounds {
   minX = 0;
   minY = 0;
@@ -927,6 +1007,8 @@ interface SvgAccumulator {
   ellipses: SvgEllipse[];
   lines: SvgLine[];
   labels: SvgLabel[];
+  images: SvgImage[];
+  imageHrefs: Map<string, string>;
   bounds: SvgBounds;
 }
 
@@ -1018,17 +1100,31 @@ function renderSvgItem(acc: SvgAccumulator, item: BoardItem): boolean {
       }
       return true;
     }
+    case "image": {
+      acc.bounds.add(cx - w / 2, cy - h / 2, w, h);
+      const href = acc.imageHrefs.get(item.id);
+      if (href) {
+        acc.images.push({
+          id: item.id,
+          x: cx - w / 2,
+          y: cy - h / 2,
+          width: w,
+          height: h,
+          href,
+        });
+      } else {
+        pushShapeRect(acc, item, cx, cy, w, h);
+      }
+      return true;
+    }
     case "sticky_note":
     case "card":
     case "app_card":
-    case "image":
     case "document": {
       acc.bounds.add(cx - w / 2, cy - h / 2, w, h);
       pushShapeRect(acc, item, cx, cy, w, h);
-      if (item.type !== "image") {
-        const label = itemLabel(item, cx, cy, w, h);
-        if (label) acc.labels.push(label);
-      }
+      const label = itemLabel(item, cx, cy, w, h);
+      if (label) acc.labels.push(label);
       return true;
     }
     default:
@@ -1115,6 +1211,8 @@ export async function buildBoardSvg(
     ellipses: [],
     lines: [],
     labels: [],
+    images: [],
+    imageHrefs: await fetchImageHrefs(absItems),
     bounds: new SvgBounds(),
   };
 
@@ -1139,6 +1237,7 @@ export async function buildBoardSvg(
     ellipses: acc.ellipses,
     lines: acc.lines,
     labels: acc.labels,
+    images: acc.images,
     rendered,
     skipped,
     totalItems: itemsPage.total,
