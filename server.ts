@@ -13,6 +13,7 @@ import path from "node:path";
 import { z } from "zod";
 import {
   buildBoardSummary,
+  buildBoardSvg,
   buildCommentThreads,
   buildConnectorsGraph,
   buildFrameOverview,
@@ -35,6 +36,7 @@ const STICKY_CLUSTERS_URI = "ui://miro-sticky-clusters/mcp-app.html";
 const RECENT_BOARDS_URI = "ui://miro-recent-boards/mcp-app.html";
 const CONNECTORS_URI = "ui://miro-connectors/mcp-app.html";
 const COMMENTS_URI = "ui://miro-comments/mcp-app.html";
+const BOARD_SVG_URI = "ui://miro-board-svg/mcp-app.html";
 
 export function createServer(): McpServer {
   const server = new McpServer({
@@ -540,6 +542,126 @@ export function createServer(): McpServer {
       return {
         contents: [
           { uri: COMMENTS_URI, mimeType: RESOURCE_MIME_TYPE, text: html },
+        ],
+      };
+    },
+  );
+
+  // ---- Tool 8: board_svg (spatial map UI) ----
+
+  registerAppTool(
+    server,
+    "miro_board_svg_app",
+    {
+      title: "Miro Board SVG (UI)",
+      description:
+        "USE WHEN the user wants to see the whole Miro board as a picture: " +
+        "every item drawn at its real position and size (frames as dashed " +
+        "outlines, stickies and shapes as colored boxes, connectors as " +
+        "lines). Renders a spatial map of the canvas instead of JSON. " +
+        "Companion to the Go miro-mcp-server's miro_read_board_svg tool; " +
+        "the geometry transform is computed locally from the item listing, " +
+        "no export job needed.",
+      inputSchema: {
+        board_id: z.string().describe("Miro board ID"),
+        max_items: z
+          .number()
+          .optional()
+          .describe("Max items to fetch (default 500, max 2000)"),
+      },
+      // Declare every field: the schema is applied to structuredContent, so an
+      // undeclared key is stripped before the view sees it.
+      outputSchema: z.object({
+        boardId: z.string(),
+        boardName: z.string(),
+        viewLink: z.string(),
+        viewBox: z.object({
+          x: z.number(),
+          y: z.number(),
+          width: z.number(),
+          height: z.number(),
+        }),
+        rects: z.array(
+          z.object({
+            id: z.string(),
+            itemType: z.string(),
+            x: z.number(),
+            y: z.number(),
+            width: z.number(),
+            height: z.number(),
+            rx: z.number(),
+            fill: z.string(),
+            dashed: z.boolean(),
+          }),
+        ),
+        ellipses: z.array(
+          z.object({
+            id: z.string(),
+            cx: z.number(),
+            cy: z.number(),
+            rx: z.number(),
+            ry: z.number(),
+            fill: z.string(),
+          }),
+        ),
+        lines: z.array(
+          z.object({
+            id: z.string(),
+            x1: z.number(),
+            y1: z.number(),
+            x2: z.number(),
+            y2: z.number(),
+          }),
+        ),
+        labels: z.array(
+          z.object({
+            x: z.number(),
+            y: z.number(),
+            text: z.string(),
+            fontSize: z.number(),
+            anchor: z.string(),
+            muted: z.boolean(),
+            maxWidth: z.number(),
+            onFill: z.boolean(),
+          }),
+        ),
+        rendered: z.number(),
+        skipped: z.number(),
+        totalItems: z.number(),
+        truncated: z.boolean(),
+      }),
+      _meta: { ui: { resourceUri: BOARD_SVG_URI } },
+    },
+    async ({ board_id, max_items }): Promise<CallToolResult> => {
+      const result = await buildBoardSvg(board_id, max_items);
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `Board '${result.boardName}' — rendered ${result.rendered} ` +
+              `items as a spatial map (${result.skipped} skipped, ` +
+              `${result.lines.length} connectors).`,
+          },
+        ],
+        structuredContent: { ...result },
+      };
+    },
+  );
+
+  registerAppResource(
+    server,
+    BOARD_SVG_URI,
+    BOARD_SVG_URI,
+    { mimeType: RESOURCE_MIME_TYPE },
+    async (): Promise<ReadResourceResult> => {
+      const html = await fs.readFile(
+        path.join(DIST_DIR, "board-svg.html"),
+        "utf-8",
+      );
+      return {
+        contents: [
+          { uri: BOARD_SVG_URI, mimeType: RESOURCE_MIME_TYPE, text: html },
         ],
       };
     },
