@@ -29,11 +29,17 @@
   overflow: hidden;
 }
 
+/* Height is set from the board's aspect ratio at render time. */
 #canvas {
   display: block;
   width: 100%;
   height: 440px;
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
+}
+
+#canvas.panning {
+  cursor: grabbing;
 }
 
 /* Item fills come from the data (Miro colors resolved to hex server-side);
@@ -80,6 +86,13 @@
   fill: #1c1917;
 }
 
+/* Placeholder where a standalone text item's label is hidden at this zoom. */
+.text-ghost {
+  fill: var(--color-text-secondary);
+  opacity: 0.15;
+  rx: 3px;
+}
+
 .empty-text {
   fill: var(--color-text-secondary);
   font-size: 13px;
@@ -98,6 +111,11 @@
 .actions .count-summary {
   color: var(--color-text-secondary);
   font-size: var(--font-text-sm-size);
+}
+
+.actions .buttons {
+  display: flex;
+  gap: var(--spacing-sm);
 }
 
 .error {
