@@ -1,11 +1,11 @@
 /**
  * Miro board-SVG UI. Receives BoardSvgResult — render primitives (rects,
  * ellipses, lines, labels) in Miro board coordinates plus a fitted viewBox —
- * and draws them as an inline SVG spatial map with drag-to-pan and
- * scroll-to-zoom. The geometry was computed server-side (TS port of the Go
- * server's svg_read.go); this file only turns primitives into DOM nodes.
- * Everything is created via createElementNS and textContent — no markup
- * injection.
+ * and draws them as an inline SVG replica of the canvas with drag-to-pan and
+ * scroll-to-zoom. Text and borders are in board units, so the render scales
+ * exactly like the real Miro canvas: a minimap when fitted, readable when
+ * zoomed. Everything is created via createElementNS and textContent — no
+ * markup injection.
  */
 import {
   App,
@@ -21,13 +21,16 @@ import "./board-svg.css";
 interface SvgRect {
   id: string;
   itemType: string;
+  kind: string;
   x: number;
   y: number;
   width: number;
   height: number;
-  rx: number;
   fill: string;
-  dashed: boolean;
+  fillOpacity: number;
+  stroke: string;
+  strokeWidth: number;
+  strokeStyle: string;
 }
 
 interface SvgEllipse {
@@ -37,6 +40,9 @@ interface SvgEllipse {
   rx: number;
   ry: number;
   fill: string;
+  fillOpacity: number;
+  stroke: string;
+  strokeWidth: number;
 }
 
 interface SvgLine {
@@ -50,12 +56,11 @@ interface SvgLine {
 interface SvgLabel {
   x: number;
   y: number;
-  text: string;
+  lines: string[];
   fontSize: number;
+  lineHeight: number;
   anchor: string;
-  muted: boolean;
-  maxWidth: number;
-  onFill: boolean;
+  color: string;
 }
 
 interface ViewBox {
@@ -84,7 +89,7 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 const MIN_CANVAS_PX = 280;
 const MAX_CANVAS_PX = 620;
 const ZOOM_STEP = 1.15;
-const MAX_ZOOM_IN = 20; // viewBox may shrink to 1/20 of the fitted width
+const MAX_ZOOM_IN = 40; // viewBox may shrink to 1/40 of the fitted width
 const MAX_ZOOM_OUT = 3; // and grow to 3x of it
 
 const appEl = document.getElementById("app")!;
@@ -99,9 +104,6 @@ const openBoardBtn = document.getElementById(
 
 let currentData: BoardSvgResult | null = null;
 let vb: ViewBox | null = null;
-let staticLayer: SVGGElement | null = null;
-let dynamicLayer: SVGGElement | null = null;
-let dynamicRedraw: number | null = null;
 
 function isBoardSvgResult(
   sc: Partial<BoardSvgResult> | undefined,
@@ -149,18 +151,10 @@ function updateHeader(data: BoardSvgResult) {
   fitBtn.disabled = false;
 }
 
-/** How many board units one CSS pixel covers at the current viewBox. */
-function unitsPerPixel(): number {
-  const box = svgEl.getBoundingClientRect();
-  const pxW = box.width || 688;
-  const pxH = box.height || 440;
-  return Math.max(vb!.width / pxW, vb!.height / pxH, 0.0001);
-}
-
 /**
  * The canvas takes the board's own aspect ratio (clamped) instead of a fixed
  * height — a wide flat board in a fixed tall box letterboxes into two big
- * empty bands, which is most of what made the first Desktop render ugly.
+ * empty bands.
  */
 function sizeCanvas(dataVb: ViewBox) {
   const width = svgEl.getBoundingClientRect().width || 688;
@@ -174,12 +168,6 @@ function sizeCanvas(dataVb: ViewBox) {
 function applyViewBox() {
   svgEl.setAttribute("viewBox", `${vb!.x} ${vb!.y} ${vb!.width} ${vb!.height}`);
   svgEl.setAttribute("preserveAspectRatio", "xMidYMid meet");
-  if (dynamicRedraw === null) {
-    dynamicRedraw = requestAnimationFrame(() => {
-      dynamicRedraw = null;
-      renderDynamicLayer();
-    });
-  }
 }
 
 function appendEmptyText(box: ViewBox, message: string) {
@@ -194,20 +182,187 @@ function appendEmptyText(box: ViewBox, message: string) {
   svgEl.appendChild(text);
 }
 
-function appendRect(parent: SVGGElement, r: SvgRect) {
-  const rect = document.createElementNS(SVG_NS, "rect");
-  setAttrs(rect, {
-    x: r.x,
-    y: r.y,
-    width: r.width,
-    height: r.height,
+// ---- Shape geometry ----
+//
+// Miro shape kinds mapped to polygon points in the item's own box. Kinds not
+// listed fall back to a plain rectangle. Points are (fraction-of-w,
+// fraction-of-h) pairs.
+const SHAPE_POLYGONS: Record<string, Array<[number, number]>> = {
+  triangle: [
+    [0.5, 0],
+    [1, 1],
+    [0, 1],
+  ],
+  rhombus: [
+    [0.5, 0],
+    [1, 0.5],
+    [0.5, 1],
+    [0, 0.5],
+  ],
+  parallelogram: [
+    [0.25, 0],
+    [1, 0],
+    [0.75, 1],
+    [0, 1],
+  ],
+  trapezoid: [
+    [0.2, 0],
+    [0.8, 0],
+    [1, 1],
+    [0, 1],
+  ],
+  pentagon: [
+    [0.5, 0],
+    [1, 0.38],
+    [0.81, 1],
+    [0.19, 1],
+    [0, 0.38],
+  ],
+  hexagon: [
+    [0.25, 0],
+    [0.75, 0],
+    [1, 0.5],
+    [0.75, 1],
+    [0.25, 1],
+    [0, 0.5],
+  ],
+  star: [
+    [0.5, 0],
+    [0.62, 0.35],
+    [1, 0.38],
+    [0.72, 0.62],
+    [0.81, 1],
+    [0.5, 0.78],
+    [0.19, 1],
+    [0.28, 0.62],
+    [0, 0.38],
+    [0.38, 0.35],
+  ],
+  right_arrow: [
+    [0, 0.25],
+    [0.6, 0.25],
+    [0.6, 0],
+    [1, 0.5],
+    [0.6, 1],
+    [0.6, 0.75],
+    [0, 0.75],
+  ],
+  left_arrow: [
+    [1, 0.25],
+    [0.4, 0.25],
+    [0.4, 0],
+    [0, 0.5],
+    [0.4, 1],
+    [0.4, 0.75],
+    [1, 0.75],
+  ],
+};
+
+/** Cloud outline as a path in a unit box, scaled per shape. */
+const CLOUD_PATH =
+  "M 0.25 0.9 C 0.08 0.9 0 0.78 0 0.65 C 0 0.52 0.09 0.44 0.18 0.42 " +
+  "C 0.18 0.26 0.3 0.12 0.48 0.12 C 0.62 0.12 0.72 0.2 0.77 0.32 " +
+  "C 0.9 0.3 1 0.42 1 0.55 C 1 0.72 0.9 0.9 0.72 0.9 Z";
+
+function strokeDash(style: string, width: number): string {
+  if (style === "dashed") return `${width * 3} ${width * 2}`;
+  if (style === "dotted") return `${width} ${width * 1.5}`;
+  return "";
+}
+
+function paintAttrs(r: {
+  fill: string;
+  fillOpacity: number;
+  stroke: string;
+  strokeWidth: number;
+}): Record<string, string | number> {
+  const attrs: Record<string, string | number> = {
     fill: r.fill,
-    class: r.dashed ? "item-frame" : "item-rect",
-    "data-miro-id": r.id,
-    "data-miro-type": r.itemType,
-  });
-  if (r.rx > 0) rect.setAttribute("rx", String(r.rx));
-  parent.appendChild(rect);
+    stroke: r.stroke,
+    "stroke-width": r.strokeWidth,
+  };
+  if (r.fillOpacity < 1) attrs["fill-opacity"] = r.fillOpacity;
+  return attrs;
+}
+
+function appendRect(parent: SVGGElement, r: SvgRect) {
+  const isFrame = r.itemType === "frame";
+  let el: SVGElement;
+
+  const polygon = SHAPE_POLYGONS[r.kind];
+  if (polygon) {
+    el = document.createElementNS(SVG_NS, "polygon");
+    el.setAttribute(
+      "points",
+      polygon
+        .map(([fx, fy]) => `${r.x + fx * r.width},${r.y + fy * r.height}`)
+        .join(" "),
+    );
+  } else if (r.kind === "cloud") {
+    el = document.createElementNS(SVG_NS, "path");
+    el.setAttribute("d", CLOUD_PATH);
+    el.setAttribute(
+      "transform",
+      `translate(${r.x} ${r.y}) scale(${r.width} ${r.height})`,
+    );
+    // The unit path is scaled non-uniformly; keep the stroke sane by
+    // scaling it down inside the transformed space.
+    el.setAttribute(
+      "stroke-width",
+      String(r.strokeWidth / Math.max(r.width, r.height)),
+    );
+  } else {
+    el = document.createElementNS(SVG_NS, "rect");
+    setAttrs(el, { x: r.x, y: r.y, width: r.width, height: r.height });
+    if (r.kind === "round_rectangle" || r.itemType === "sticky_note") {
+      el.setAttribute(
+        "rx",
+        String(Math.min(r.width, r.height) * (r.kind ? 0.12 : 0.04)),
+      );
+    } else if (r.itemType === "card" || r.itemType === "app_card") {
+      el.setAttribute("rx", "8");
+    }
+  }
+
+  const attrs = paintAttrs(r);
+  if (r.kind === "cloud") delete attrs["stroke-width"];
+  setAttrs(el, attrs);
+  const dash = strokeDash(r.strokeStyle, r.strokeWidth);
+  if (dash) el.setAttribute("stroke-dasharray", dash);
+  if (isFrame) {
+    el.setAttribute("class", "item-frame");
+    // Frames keep a hairline outline at any zoom — like Miro's frame border.
+    el.setAttribute("vector-effect", "non-scaling-stroke");
+    el.setAttribute("stroke-width", "1");
+  }
+  el.setAttribute("data-miro-id", r.id);
+  el.setAttribute("data-miro-type", r.itemType);
+  parent.appendChild(el);
+
+  if (r.itemType === "image") appendImageGlyph(parent, r);
+}
+
+/** Small mountains-and-sun glyph centered in an image placeholder. */
+function appendImageGlyph(parent: SVGGElement, r: SvgRect) {
+  const s = Math.min(r.width, r.height) * 0.4;
+  const gx = r.x + r.width / 2 - s / 2;
+  const gy = r.y + r.height / 2 - s / 2;
+  const g = document.createElementNS(SVG_NS, "g");
+  g.setAttribute("class", "image-glyph");
+
+  const sun = document.createElementNS(SVG_NS, "circle");
+  setAttrs(sun, { cx: gx + s * 0.7, cy: gy + s * 0.28, r: s * 0.12 });
+
+  const mountains = document.createElementNS(SVG_NS, "path");
+  mountains.setAttribute(
+    "d",
+    `M ${gx} ${gy + s} L ${gx + s * 0.35} ${gy + s * 0.45} ` +
+      `L ${gx + s * 0.55} ${gy + s * 0.72} L ${gx + s * 0.75} ${gy + s * 0.5} ` +
+      `L ${gx + s} ${gy + s} Z`,
+  );
+
+  g.append(sun, mountains);
+  parent.appendChild(g);
 }
 
 function appendEllipse(parent: SVGGElement, e: SvgEllipse) {
@@ -217,8 +372,7 @@ function appendEllipse(parent: SVGGElement, e: SvgEllipse) {
     cy: e.cy,
     rx: e.rx,
     ry: e.ry,
-    fill: e.fill,
-    class: "item-ellipse",
+    ...paintAttrs(e),
     "data-miro-id": e.id,
     "data-miro-type": "shape",
   });
@@ -233,71 +387,53 @@ function appendLine(parent: SVGGElement, l: SvgLine) {
     x2: l.x2,
     y2: l.y2,
     class: "connector-line",
+    "marker-end": "url(#arrow)",
     "data-miro-id": l.id,
     "data-miro-type": "connector",
   });
   parent.appendChild(line);
 }
 
-/** Rough advance width of a glyph as a fraction of the font size. */
-const GLYPH_WIDTH_FACTOR = 0.62;
-
-/**
- * A label earns its place only when it fits its item at the current zoom.
- * Labels render at a fixed on-screen size, so on a dense board an
- * unconditional draw degenerates into overlapping noise. maxWidth is the
- * item's width in board units; 0 means always draw (frame titles, connector
- * captions). Zooming in makes more labels fit — the dynamic layer redraws on
- * every viewBox change.
- */
-function labelFits(l: SvgLabel, upp: number): boolean {
-  if (l.maxWidth <= 0) return true;
-  return l.text.length * l.fontSize * GLYPH_WIDTH_FACTOR * upp <= l.maxWidth;
+/** Arrowhead marker sized in board units so it scales with the canvas. */
+function appendArrowMarker(parent: SVGGElement, boardWidth: number) {
+  const size = Math.max(8, boardWidth * 0.004);
+  const defs = document.createElementNS(SVG_NS, "defs");
+  const marker = document.createElementNS(SVG_NS, "marker");
+  setAttrs(marker, {
+    id: "arrow",
+    viewBox: "0 0 10 10",
+    refX: 9,
+    refY: 5,
+    markerWidth: size,
+    markerHeight: size,
+    markerUnits: "userSpaceOnUse",
+    orient: "auto-start-reverse",
+  });
+  const path = document.createElementNS(SVG_NS, "path");
+  path.setAttribute("d", "M 0 0 L 10 5 L 0 10 z");
+  path.setAttribute("class", "arrowhead");
+  marker.appendChild(path);
+  defs.appendChild(marker);
+  parent.appendChild(defs);
 }
 
-function appendLabel(parent: SVGGElement, l: SvgLabel, upp: number) {
+function appendLabel(parent: SVGGElement, l: SvgLabel) {
   const text = document.createElementNS(SVG_NS, "text");
   setAttrs(text, {
-    x: l.x,
-    y: l.y,
     "text-anchor": l.anchor,
-    "font-size": l.fontSize * upp,
-    class:
-      "item-label" + (l.muted ? " muted" : "") + (l.onFill ? " on-fill" : ""),
+    "font-size": l.fontSize,
+    fill: l.color,
+    class: "item-label",
   });
-  text.textContent = l.text;
+  const n = l.lines.length;
+  const firstY = l.y - ((n - 1) / 2) * l.lineHeight + l.fontSize * 0.35;
+  l.lines.forEach((lineText, i) => {
+    const tspan = document.createElementNS(SVG_NS, "tspan");
+    setAttrs(tspan, { x: l.x, y: firstY + i * l.lineHeight });
+    tspan.textContent = lineText;
+    text.appendChild(tspan);
+  });
   parent.appendChild(text);
-}
-
-/**
- * A standalone text item whose label is hidden at this zoom leaves a truly
- * blank region — unlike a box label, there is no shape underneath. Mark the
- * spot with a faint ghost so text-dense areas read as occupied.
- */
-function appendTextGhost(parent: SVGGElement, l: SvgLabel) {
-  const rect = document.createElementNS(SVG_NS, "rect");
-  setAttrs(rect, {
-    x: l.x - l.maxWidth / 2,
-    y: l.y - 10,
-    width: l.maxWidth,
-    height: 20,
-    class: "text-ghost",
-  });
-  parent.appendChild(rect);
-}
-
-function renderDynamicLayer() {
-  if (!currentData || !dynamicLayer) return;
-  while (dynamicLayer.firstChild)
-    dynamicLayer.removeChild(dynamicLayer.firstChild);
-  const upp = unitsPerPixel();
-  for (const l of currentData.labels) {
-    if (labelFits(l, upp)) {
-      appendLabel(dynamicLayer, l, upp);
-    } else if (!l.onFill && l.maxWidth > 0) {
-      appendTextGhost(dynamicLayer, l);
-    }
-  }
 }
 
 function render(data: BoardSvgResult) {
@@ -307,23 +443,23 @@ function render(data: BoardSvgResult) {
 
   while (svgEl.firstChild) svgEl.removeChild(svgEl.firstChild);
   sizeCanvas(data.viewBox);
+  applyViewBox();
 
   if (data.rendered === 0 && data.lines.length === 0) {
-    applyViewBox();
     appendEmptyText(data.viewBox, "No renderable items on this board.");
     return;
   }
 
-  staticLayer = document.createElementNS(SVG_NS, "g");
-  dynamicLayer = document.createElementNS(SVG_NS, "g");
-  svgEl.append(staticLayer, dynamicLayer);
+  const layer = document.createElementNS(SVG_NS, "g");
+  svgEl.appendChild(layer);
+  appendArrowMarker(layer, data.viewBox.width);
 
   // Draw order: rects arrive frames-first from the builder, so frames sit
   // under everything; connectors go above shapes, labels on top.
-  for (const r of data.rects) appendRect(staticLayer, r);
-  for (const e of data.ellipses) appendEllipse(staticLayer, e);
-  for (const l of data.lines) appendLine(staticLayer, l);
-  applyViewBox();
+  for (const r of data.rects) appendRect(layer, r);
+  for (const e of data.ellipses) appendEllipse(layer, e);
+  for (const l of data.lines) appendLine(layer, l);
+  for (const l of data.labels) appendLabel(layer, l);
 }
 
 // ---- Pan and zoom ----
