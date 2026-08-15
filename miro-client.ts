@@ -435,7 +435,9 @@ function toGraphNode(item: BoardItem): ConnectorsGraphResult["nodes"][number] {
   };
 }
 
-function cleanCaption(captions?: Array<{ content?: string }>): string | undefined {
+function cleanCaption(
+  captions?: Array<{ content?: string }>,
+): string | undefined {
   return captions?.[0]?.content
     ?.replace(/<[^>]+>/g, "")
     .trim()
@@ -595,8 +597,7 @@ export async function buildCommentThreads(
       authorName: t.createdBy?.name,
       // Only an "attached" thread has an item; anything else is unanchored
       // and has no location worth showing.
-      itemId:
-        t.position?.type === "attached" ? t.position?.itemId : undefined,
+      itemId: t.position?.type === "attached" ? t.position?.itemId : undefined,
       messages,
       // The opening message is not a reply, so a thread with one message has
       // zero replies rather than one.
@@ -614,5 +615,440 @@ export async function buildCommentThreads(
     openCount: threads.length - resolvedCount,
     resolvedCount,
     total: comments.total ?? threads.length,
+  };
+}
+
+// ---- Tool 8: board SVG ----
+//
+// TypeScript rewrite of the Go server's miro/svg_read.go geometry (bounds
+// accumulation, per-type rendering, connectors between item centers). The
+// mapping is deliberately flat: frames and cards become outlined rects,
+// stickies and shapes become filled rects or ellipses, text becomes labels,
+// connectors become lines between item centers. Items with no useful geometry
+// are counted as skipped rather than guessed at.
+//
+// One deliberate deviation from the Go reference: Go passes style.fillColor
+// into the SVG fill attribute raw, but Miro returns NAMED colors on sticky
+// notes ("light_yellow"), which are not valid SVG paint. Named colors are
+// normalized to hex here (same palette as the sticky-clusters view).
+
+/** Item cap for a render when the caller does not specify one. */
+const DEFAULT_SVG_ITEMS = 500;
+/** Hard cap on the item fetch for a render. */
+const MAX_SVG_ITEMS = 2000;
+/** Miro's per-page maximum for the items endpoint. */
+const ITEMS_PAGE_LIMIT = 50;
+
+/** Miro named fill colors → hex. Sticky enums use the sticky-clusters view's
+ * swatch palette; plain names cover the hex-only fields' common inputs. */
+const NAMED_FILL: Record<string, string> = {
+  yellow: "#fef08a",
+  light_yellow: "#fef9c3",
+  orange: "#fed7aa",
+  light_orange: "#ffedd5",
+  red: "#fecaca",
+  light_red: "#fee2e2",
+  pink: "#fbcfe8",
+  light_pink: "#fce7f3",
+  violet: "#ddd6fe",
+  light_violet: "#ede9fe",
+  blue: "#bfdbfe",
+  light_blue: "#dbeafe",
+  cyan: "#a5f3fc",
+  light_cyan: "#cffafe",
+  green: "#bbf7d0",
+  light_green: "#dcfce7",
+  gray: "#e5e7eb",
+  light_gray: "#f3f4f6",
+  dark_blue: "#93c5fd",
+  dark_green: "#86efac",
+  black: "#1f2937",
+  white: "#ffffff",
+};
+
+export interface SvgRect {
+  id: string;
+  itemType: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Corner radius: 4 for sticky/card boxes, 0 for shapes and frames. */
+  rx: number;
+  /** Resolved SVG paint; "none" for frames. */
+  fill: string;
+  /** True for frames, which render as dashed outlines. */
+  dashed: boolean;
+}
+
+export interface SvgEllipse {
+  id: string;
+  cx: number;
+  cy: number;
+  rx: number;
+  ry: number;
+  fill: string;
+}
+
+export interface SvgLine {
+  id: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+export interface SvgLabel {
+  x: number;
+  y: number;
+  text: string;
+  fontSize: number;
+  /** SVG text-anchor. Frame titles are "start", everything else "middle". */
+  anchor: string;
+  /** Secondary-color text: frame titles and connector captions. */
+  muted: boolean;
+  /**
+   * Width budget in board units: the label is only worth drawing when it fits
+   * this space at the current zoom. 0 means always draw (frame titles and
+   * connector captions sit outside any box and stay sparse).
+   */
+  maxWidth: number;
+  /**
+   * True when the label sits on a filled item (shape or box) and needs dark
+   * ink; false for labels on the canvas background (standalone text, frame
+   * titles, captions), which take the host theme's text color.
+   */
+  onFill: boolean;
+}
+
+export interface BoardSvgResult {
+  boardId: string;
+  boardName: string;
+  viewLink: string;
+  /** Fitted to the rendered bounds with 20 units of padding. */
+  viewBox: { x: number; y: number; width: number; height: number };
+  rects: SvgRect[];
+  ellipses: SvgEllipse[];
+  lines: SvgLine[];
+  labels: SvgLabel[];
+  rendered: number;
+  skipped: number;
+  totalItems: number;
+  truncated: boolean;
+}
+
+/** Follows links.next cursors until maxItems items are fetched or the pages
+ * run out. Returns the API's own total alongside the fetched page union. */
+async function listAllBoardItems(
+  boardId: string,
+  maxItems: number,
+): Promise<{ items: BoardItem[]; total: number; truncated: boolean }> {
+  const items: BoardItem[] = [];
+  let total = 0;
+  let cursor: string | undefined;
+
+  for (;;) {
+    const params = new URLSearchParams();
+    params.set(
+      "limit",
+      String(Math.min(ITEMS_PAGE_LIMIT, maxItems - items.length)),
+    );
+    if (cursor) params.set("cursor", cursor);
+    const page = await miroFetch<BoardItemsResponse>(
+      `/boards/${encodeURIComponent(boardId)}/items?${params.toString()}`,
+    );
+    items.push(...page.data);
+    total = page.total;
+    const next = page.links?.next;
+    if (!next || items.length >= maxItems) {
+      return { items, total, truncated: Boolean(next) };
+    }
+    cursor = new URL(next).searchParams.get("cursor") ?? undefined;
+    if (!cursor) return { items, total, truncated: true };
+  }
+}
+
+function clampSvgMaxItems(n: number | undefined): number {
+  if (n && n > 0 && n <= MAX_SVG_ITEMS) return n;
+  return DEFAULT_SVG_ITEMS;
+}
+
+/** An item carries enough geometry to draw when it has an area, or is text
+ * (which gets a width estimated from its label). */
+function svgRenderable(item: BoardItem): boolean {
+  const w = item.geometry?.width ?? 0;
+  const h = item.geometry?.height ?? 0;
+  return (w > 0 && h > 0) || item.type === "text";
+}
+
+function svgFill(item: BoardItem): string {
+  const c = item.style?.fillColor ?? "";
+  if (/^#[0-9a-fA-F]{3,8}$/.test(c)) return c;
+  if (c && NAMED_FILL[c]) return NAMED_FILL[c];
+  switch (item.type) {
+    case "sticky_note":
+      return "#fff9b1"; // Miro's default yellow
+    case "frame":
+      return "none";
+    default:
+      return "#e6e6e6";
+  }
+}
+
+function svgLabelText(content: string | undefined): string {
+  const s = stripHtml(content);
+  return s.length > 60 ? s.slice(0, 57) + "..." : s;
+}
+
+class SvgBounds {
+  minX = 0;
+  minY = 0;
+  maxX = 0;
+  maxY = 0;
+  private set = false;
+
+  add(x: number, y: number, w: number, h: number): void {
+    if (!this.set) {
+      this.minX = x;
+      this.minY = y;
+      this.maxX = x + w;
+      this.maxY = y + h;
+      this.set = true;
+      return;
+    }
+    this.minX = Math.min(this.minX, x);
+    this.minY = Math.min(this.minY, y);
+    this.maxX = Math.max(this.maxX, x + w);
+    this.maxY = Math.max(this.maxY, y + h);
+  }
+
+  /** ViewBox fitted to the accumulated bounds, padded; a fallback box when
+   * nothing rendered. */
+  viewBox(pad: number): BoardSvgResult["viewBox"] {
+    if (!this.set) return { x: 0, y: 0, width: 100, height: 100 };
+    return {
+      x: this.minX - pad,
+      y: this.minY - pad,
+      width: this.maxX - this.minX + 2 * pad,
+      height: this.maxY - this.minY + 2 * pad,
+    };
+  }
+}
+
+interface SvgAccumulator {
+  rects: SvgRect[];
+  ellipses: SvgEllipse[];
+  lines: SvgLine[];
+  labels: SvgLabel[];
+  bounds: SvgBounds;
+}
+
+function renderSvgItem(acc: SvgAccumulator, item: BoardItem): boolean {
+  if (!svgRenderable(item)) return false;
+  const label = svgLabelText(item.data?.title ?? item.data?.content);
+  const cx = item.position?.x ?? 0;
+  const cy = item.position?.y ?? 0;
+  const w = item.geometry?.width ?? 0;
+  const h = item.geometry?.height ?? 0;
+
+  switch (item.type) {
+    case "text": {
+      const textW = w > 0 ? w : label.length * 8;
+      acc.bounds.add(cx - textW / 2, cy - 10, textW, 20);
+      acc.labels.push({
+        x: cx,
+        y: cy,
+        text: label,
+        fontSize: 14,
+        anchor: "middle",
+        muted: false,
+        maxWidth: textW,
+        onFill: false,
+      });
+      return true;
+    }
+    case "shape": {
+      acc.bounds.add(cx - w / 2, cy - h / 2, w, h);
+      if (item.data?.shape === "circle") {
+        acc.ellipses.push({
+          id: item.id,
+          cx,
+          cy,
+          rx: w / 2,
+          ry: h / 2,
+          fill: svgFill(item),
+        });
+      } else {
+        acc.rects.push({
+          id: item.id,
+          itemType: "shape",
+          x: cx - w / 2,
+          y: cy - h / 2,
+          width: w,
+          height: h,
+          rx: 0,
+          fill: svgFill(item),
+          dashed: false,
+        });
+      }
+      if (label) {
+        acc.labels.push({
+          x: cx,
+          y: cy,
+          text: label,
+          fontSize: 12,
+          anchor: "middle",
+          muted: false,
+          maxWidth: w,
+          onFill: true,
+        });
+      }
+      return true;
+    }
+    case "frame": {
+      acc.bounds.add(cx - w / 2, cy - h / 2, w, h);
+      acc.rects.push({
+        id: item.id,
+        itemType: "frame",
+        x: cx - w / 2,
+        y: cy - h / 2,
+        width: w,
+        height: h,
+        rx: 0,
+        fill: "none",
+        dashed: true,
+      });
+      if (label) {
+        acc.labels.push({
+          x: cx - w / 2 + 4,
+          y: cy - h / 2 - 6,
+          text: label,
+          fontSize: 12,
+          anchor: "start",
+          muted: true,
+          maxWidth: 0,
+          onFill: false,
+        });
+      }
+      return true;
+    }
+    case "sticky_note":
+    case "card":
+    case "app_card":
+    case "image":
+    case "document": {
+      acc.bounds.add(cx - w / 2, cy - h / 2, w, h);
+      acc.rects.push({
+        id: item.id,
+        itemType: item.type,
+        x: cx - w / 2,
+        y: cy - h / 2,
+        width: w,
+        height: h,
+        rx: 4,
+        fill: svgFill(item),
+        dashed: false,
+      });
+      if (label) {
+        acc.labels.push({
+          x: cx,
+          y: cy,
+          text: label,
+          fontSize: 12,
+          anchor: "middle",
+          muted: false,
+          maxWidth: w,
+          onFill: true,
+        });
+      }
+      return true;
+    }
+    default:
+      return false;
+  }
+}
+
+function renderSvgConnectors(
+  acc: SvgAccumulator,
+  connectors: Connector[],
+  byId: Map<string, BoardItem>,
+): void {
+  for (const conn of connectors) {
+    const from = conn.startItem?.id ? byId.get(conn.startItem.id) : undefined;
+    const to = conn.endItem?.id ? byId.get(conn.endItem.id) : undefined;
+    if (!from || !to) continue;
+    const x1 = from.position?.x ?? 0;
+    const y1 = from.position?.y ?? 0;
+    const x2 = to.position?.x ?? 0;
+    const y2 = to.position?.y ?? 0;
+    acc.lines.push({ id: conn.id, x1, y1, x2, y2 });
+    const caption = svgLabelText(conn.captions?.[0]?.content);
+    if (caption) {
+      acc.labels.push({
+        x: (x1 + x2) / 2,
+        y: (y1 + y2) / 2 - 4,
+        text: caption,
+        fontSize: 10,
+        anchor: "middle",
+        muted: true,
+        maxWidth: 0,
+        onFill: false,
+      });
+    }
+  }
+}
+
+export async function buildBoardSvg(
+  boardId: string,
+  maxItems?: number,
+): Promise<BoardSvgResult> {
+  const [board, itemsPage] = await Promise.all([
+    getBoard(boardId),
+    listAllBoardItems(boardId, clampSvgMaxItems(maxItems)),
+  ]);
+
+  // Connectors are best-effort decoration; a failure there shouldn't sink
+  // the render.
+  let connectors: Connector[] = [];
+  try {
+    connectors = (await listConnectors(boardId, { limit: 50 })).data;
+  } catch {
+    // v2 connectors listing failed; render items without edges.
+  }
+
+  const byId = new Map(itemsPage.items.map((i) => [i.id, i]));
+  const acc: SvgAccumulator = {
+    rects: [],
+    ellipses: [],
+    lines: [],
+    labels: [],
+    bounds: new SvgBounds(),
+  };
+
+  // Two passes: frames first, so they sit under their children.
+  let rendered = 0;
+  let skipped = 0;
+  for (const framesPass of [true, false]) {
+    for (const item of itemsPage.items) {
+      if ((item.type === "frame") !== framesPass) continue;
+      if (renderSvgItem(acc, item)) rendered++;
+      else skipped++;
+    }
+  }
+  renderSvgConnectors(acc, connectors, byId);
+
+  return {
+    boardId: board.id,
+    boardName: board.name,
+    viewLink: board.viewLink,
+    viewBox: acc.bounds.viewBox(20),
+    rects: acc.rects,
+    ellipses: acc.ellipses,
+    lines: acc.lines,
+    labels: acc.labels,
+    rendered,
+    skipped,
+    totalItems: itemsPage.total,
+    truncated: itemsPage.truncated,
   };
 }

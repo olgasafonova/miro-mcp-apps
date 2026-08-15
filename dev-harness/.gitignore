@@ -1,3 +1,5 @@
 fixtures.js
+# Built view copies staged for the harness (cp dist/<view>.html dev-harness/)
+board-svg.html
 comments.html
 recent-boards.html

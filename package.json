@@ -12,14 +12,15 @@
     "build:ui:stickies": "cross-env INPUT=sticky-clusters.html vite build",
     "build:ui:recent": "cross-env INPUT=recent-boards.html vite build",
     "build:ui:connectors": "cross-env INPUT=connectors.html vite build",
-    "build:ui": "npm run build:ui:summary && npm run build:ui:list && npm run build:ui:frames && npm run build:ui:stickies && npm run build:ui:recent && npm run build:ui:connectors && npm run build:ui:comments",
+    "build:ui": "npm run build:ui:summary && npm run build:ui:list && npm run build:ui:frames && npm run build:ui:stickies && npm run build:ui:recent && npm run build:ui:connectors && npm run build:ui:comments && npm run build:ui:svg",
     "build:server": "tsc -p tsconfig.server.json",
     "build": "tsc --noEmit && npm run build:ui && npm run build:server",
     "start": "node dist/main.js",
     "start:stdio": "node dist/main.js --stdio",
     "dev:stdio": "tsx main.ts --stdio",
     "dev": "tsx watch main.ts",
-    "build:ui:comments": "cross-env INPUT=comments.html vite build"
+    "build:ui:comments": "cross-env INPUT=comments.html vite build",
+    "build:ui:svg": "cross-env INPUT=board-svg.html vite build"
   },
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "^1.0.0",

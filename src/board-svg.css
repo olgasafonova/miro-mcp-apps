@@ -1,0 +1,109 @@
+.app {
+  max-width: 720px;
+  padding: var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.header h1 {
+  word-break: break-word;
+}
+
+.subtitle {
+  color: var(--color-text-secondary);
+  font-size: var(--font-text-sm-size);
+  margin: 0;
+}
+
+.canvas-wrap {
+  border: var(--border-width-regular) solid var(--color-border);
+  border-radius: var(--border-radius-md);
+  background: var(--color-background-secondary);
+  overflow: hidden;
+}
+
+#canvas {
+  display: block;
+  width: 100%;
+  height: 440px;
+  cursor: pointer;
+}
+
+/* Item fills come from the data (Miro colors resolved to hex server-side);
+   strokes stay themed so outlines survive both light and dark hosts. */
+.item-rect {
+  stroke: var(--color-text-secondary);
+  vector-effect: non-scaling-stroke;
+  stroke-width: 1;
+}
+
+.item-frame {
+  stroke: var(--color-text-secondary);
+  opacity: 0.7;
+  vector-effect: non-scaling-stroke;
+  stroke-width: 1;
+  stroke-dasharray: 6 3;
+}
+
+.item-ellipse {
+  stroke: var(--color-text-secondary);
+  vector-effect: non-scaling-stroke;
+  stroke-width: 1;
+}
+
+.connector-line {
+  stroke: var(--color-text-secondary);
+  opacity: 0.6;
+  vector-effect: non-scaling-stroke;
+  stroke-width: 1.5;
+}
+
+/* Labels on the canvas background follow the host theme; labels sitting on a
+   filled item keep dark ink, because the fills are light regardless of theme. */
+.item-label {
+  fill: var(--color-text-primary);
+  font-family: var(--font-sans);
+}
+
+.item-label.muted {
+  fill: var(--color-text-secondary);
+}
+
+.item-label.on-fill {
+  fill: #1c1917;
+}
+
+.empty-text {
+  fill: var(--color-text-secondary);
+  font-size: 13px;
+  font-family: var(--font-sans);
+  font-style: italic;
+}
+
+.actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: var(--spacing-sm);
+  gap: var(--spacing-md);
+}
+
+.actions .count-summary {
+  color: var(--color-text-secondary);
+  font-size: var(--font-text-sm-size);
+}
+
+.error {
+  padding: var(--spacing-md);
+  border-radius: var(--border-radius-md);
+  background: var(--color-background-info);
+  color: var(--color-text-info);
+  font-size: var(--font-text-sm-size);
+}
