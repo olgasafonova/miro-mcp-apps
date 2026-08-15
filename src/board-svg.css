@@ -22,10 +22,13 @@
   margin: 0;
 }
 
+/* The canvas replicates Miro's board surface, which stays light even in
+   Miro's own dark mode — item fills and text colors come from board data and
+   assume a light ground, so the surface does not follow the host theme. */
 .canvas-wrap {
   border: var(--border-width-regular) solid var(--color-border);
   border-radius: var(--border-radius-md);
-  background: var(--color-background-secondary);
+  background: #f2f2f0;
   overflow: hidden;
 }
 
@@ -42,59 +45,30 @@
   cursor: grabbing;
 }
 
-/* Item fills come from the data (Miro colors resolved to hex server-side);
-   strokes stay themed so outlines survive both light and dark hosts. */
-.item-rect {
-  stroke: var(--color-text-secondary);
-  vector-effect: non-scaling-stroke;
-  stroke-width: 1;
-}
-
-.item-frame {
-  stroke: var(--color-text-secondary);
-  opacity: 0.7;
-  vector-effect: non-scaling-stroke;
-  stroke-width: 1;
-  stroke-dasharray: 6 3;
-}
-
-.item-ellipse {
-  stroke: var(--color-text-secondary);
-  vector-effect: non-scaling-stroke;
-  stroke-width: 1;
-}
-
+/* Paint (fill, stroke, opacity) is inline from board data; classes carry
+   only what data does not. */
 .connector-line {
-  stroke: var(--color-text-secondary);
-  opacity: 0.6;
-  vector-effect: non-scaling-stroke;
-  stroke-width: 1.5;
+  stroke: #4b5563;
+  stroke-width: 3;
+  opacity: 0.85;
 }
 
-/* Labels on the canvas background follow the host theme; labels sitting on a
-   filled item keep dark ink, because the fills are light regardless of theme. */
+.arrowhead {
+  fill: #4b5563;
+  opacity: 0.85;
+}
+
+.image-glyph {
+  fill: #94a3b8;
+  stroke: none;
+}
+
 .item-label {
-  fill: var(--color-text-primary);
   font-family: var(--font-sans);
 }
 
-.item-label.muted {
-  fill: var(--color-text-secondary);
-}
-
-.item-label.on-fill {
-  fill: #1c1917;
-}
-
-/* Placeholder where a standalone text item's label is hidden at this zoom. */
-.text-ghost {
-  fill: var(--color-text-secondary);
-  opacity: 0.15;
-  rx: 3px;
-}
-
 .empty-text {
-  fill: var(--color-text-secondary);
+  fill: #6b7280;
   font-size: 13px;
   font-family: var(--font-sans);
   font-style: italic;

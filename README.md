@@ -23,7 +23,7 @@ This is the n4o pilot from `claude-code-config-n4o`. See bead for strategic cont
 | `miro_recent_boards_app` | Table of N most-recently-modified boards (no board ID needed); click row to open in Miro. | optional `limit` (default 20, max 50) |
 | `miro_connectors_app` | SVG graph of items + connectors — nodes are items with at least one connector, edges carry caption text where present, normalized from Miro-space coordinates to a 600×400 viewport. | `board_id` |
 | `miro_comment_threads_app` | Comment threads as filterable cards (open / resolved / all), each with its opening message and replies inline. Read-only. Uses the v2-experimental API. | `board_id`, optional `limit` (default 50) |
-| `miro_board_svg_app` | The whole board as a spatial map: every item drawn at its real position and size (frames dashed, stickies and shapes as colored boxes, connectors as lines), viewBox fitted to the content. Labels draw only when they fit their item at the current zoom. TypeScript port of the Go server's `miro_read_board_svg` geometry. | `board_id`, optional `max_items` (default 500, max 2000) |
+| `miro_board_svg_app` | The whole board rendered like Miro's own canvas: real shape kinds (cloud, round-rectangle, triangle, …), real fill/border styles, wrapped text that scales with zoom, connectors with arrowheads, image placeholders. Drag to pan, scroll to zoom, Fit to reset. TypeScript port of the Go server's `miro_read_board_svg` geometry, upgraded for fidelity. | `board_id`, optional `max_items` (default 500, max 2000) |
 
 ## Prerequisites
 

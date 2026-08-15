@@ -617,20 +617,21 @@ export async function buildCommentThreads(
     total: comments.total ?? threads.length,
   };
 }
-
 // ---- Tool 8: board SVG ----
 //
-// TypeScript rewrite of the Go server's miro/svg_read.go geometry (bounds
-// accumulation, per-type rendering, connectors between item centers). The
-// mapping is deliberately flat: frames and cards become outlined rects,
-// stickies and shapes become filled rects or ellipses, text becomes labels,
-// connectors become lines between item centers. Items with no useful geometry
-// are counted as skipped rather than guessed at.
+// TypeScript rewrite of the Go server's miro/svg_read.go geometry, upgraded
+// for fidelity: real shape kinds, real border/fill styles, and text that
+// scales with the board — zoomed out it looks like Miro's own minimap,
+// zoomed in the text becomes readable, exactly as the real canvas behaves.
 //
-// One deliberate deviation from the Go reference: Go passes style.fillColor
-// into the SVG fill attribute raw, but Miro returns NAMED colors on sticky
-// notes ("light_yellow"), which are not valid SVG paint. Named colors are
-// normalized to hex here (same palette as the sticky-clusters view).
+// Deliberate deviations from the Go reference:
+// - Named Miro colors normalize to hex ("light_yellow" is not valid SVG paint).
+// - Labels are wrapped word-by-word into lines in board units (Miro-like
+//   scaling) instead of one fixed-size line.
+// - Image bits are NOT embedded: on the probe board every image item's
+//   data.imageUrl pointed at resources/images/0, which the API rejects with
+//   400 "resource_id: Has illegal integer number value" (probed 15-08-2026).
+//   Image items render as a placeholder frame with a glyph instead.
 
 /** Item cap for a render when the caller does not specify one. */
 const DEFAULT_SVG_ITEMS = 500;
@@ -669,16 +670,22 @@ const NAMED_FILL: Record<string, string> = {
 export interface SvgRect {
   id: string;
   itemType: string;
+  /** Miro shape kind (round_rectangle, cloud, triangle, …); "" for non-shapes. */
+  kind: string;
   x: number;
   y: number;
   width: number;
   height: number;
-  /** Corner radius: 4 for sticky/card boxes, 0 for shapes and frames. */
-  rx: number;
-  /** Resolved SVG paint; "none" for frames. */
+  /** Resolved SVG paint; "none" for frames and unfilled shapes. */
   fill: string;
-  /** True for frames, which render as dashed outlines. */
-  dashed: boolean;
+  /** 0..1; Miro's fillOpacity, 1 when unset. */
+  fillOpacity: number;
+  /** Border paint; "none" for stickies. */
+  stroke: string;
+  /** Border width in board units. */
+  strokeWidth: number;
+  /** normal | dashed | dotted (Miro borderStyle). */
+  strokeStyle: string;
 }
 
 export interface SvgEllipse {
@@ -688,6 +695,9 @@ export interface SvgEllipse {
   rx: number;
   ry: number;
   fill: string;
+  fillOpacity: number;
+  stroke: string;
+  strokeWidth: number;
 }
 
 export interface SvgLine {
@@ -699,26 +709,18 @@ export interface SvgLine {
 }
 
 export interface SvgLabel {
+  /** Anchor x: block center for "middle", left edge for "start". */
   x: number;
+  /** Vertical center of the text block. */
   y: number;
-  text: string;
+  /** Pre-wrapped lines, in board units of the fontSize below. */
+  lines: string[];
+  /** Font size in board units — text scales with zoom, like Miro's canvas. */
   fontSize: number;
-  /** SVG text-anchor. Frame titles are "start", everything else "middle". */
+  lineHeight: number;
   anchor: string;
-  /** Secondary-color text: frame titles and connector captions. */
-  muted: boolean;
-  /**
-   * Width budget in board units: the label is only worth drawing when it fits
-   * this space at the current zoom. 0 means always draw (frame titles and
-   * connector captions sit outside any box and stay sparse).
-   */
-  maxWidth: number;
-  /**
-   * True when the label sits on a filled item (shape or box) and needs dark
-   * ink; false for labels on the canvas background (standalone text, frame
-   * titles, captions), which take the host theme's text color.
-   */
-  onFill: boolean;
+  /** Text paint (style.color when set, sensible default otherwise). */
+  color: string;
 }
 
 export interface BoardSvgResult {
@@ -774,38 +776,114 @@ function clampSvgMaxItems(n: number | undefined): number {
 }
 
 /** An item carries enough geometry to draw when it has an area, or is text
- * (which gets a width estimated from its label). */
+ * (which gets a width estimated from its content). */
 function svgRenderable(item: BoardItem): boolean {
   const w = item.geometry?.width ?? 0;
   const h = item.geometry?.height ?? 0;
   return (w > 0 && h > 0) || item.type === "text";
 }
 
-/**
- * Per-type default fills for items that carry no explicit color. Without
- * this, every shape, card, image and document renders the same flat gray and
- * the map reads as a sea of indistinguishable boxes (first Desktop pass).
- */
-const TYPE_FILL: Record<string, string> = {
-  sticky_note: "#fff9b1", // Miro's default yellow
-  shape: "#dbeafe",
-  card: "#e0e7ff",
-  app_card: "#ede9fe",
-  image: "#dcfce7",
-  document: "#ffedd5",
-};
-
-function svgFill(item: BoardItem): string {
-  const c = item.style?.fillColor ?? "";
+function resolvePaint(c: string | undefined): string | undefined {
+  if (!c) return undefined;
   if (/^#[0-9a-fA-F]{3,8}$/.test(c)) return c;
-  if (c && NAMED_FILL[c]) return NAMED_FILL[c];
-  if (item.type === "frame") return "none";
-  return TYPE_FILL[item.type] ?? "#e6e6e6";
+  return NAMED_FILL[c];
 }
 
-function svgLabelText(content: string | undefined): string {
-  const s = stripHtml(content);
-  return s.length > 60 ? s.slice(0, 57) + "..." : s;
+function svgFill(item: BoardItem): string {
+  const explicit = resolvePaint(item.style?.fillColor);
+  if (explicit) return explicit;
+  switch (item.type) {
+    case "sticky_note":
+      return "#fff9b1"; // Miro's default yellow
+    case "shape":
+      return "none"; // Miro's default shape is border-only
+    case "frame":
+      return "none";
+    case "image":
+      return "#f1f5f9";
+    default:
+      return "#ffffff";
+  }
+}
+
+interface ItemStyle {
+  fillColor?: string;
+  borderColor?: string;
+  borderWidth?: number | string;
+  borderStyle?: string;
+  borderOpacity?: number | string;
+  fillOpacity?: number | string;
+  color?: string;
+  fontSize?: number | string;
+}
+
+function asNumber(v: number | string | undefined, fallback: number): number {
+  const n = typeof v === "string" ? parseFloat(v) : v;
+  return n !== undefined && Number.isFinite(n) ? n : fallback;
+}
+
+/**
+ * Greedy word wrap into at most maxLines lines of roughly maxChars each.
+ * Board-unit fonts make the budget deterministic: it depends only on the
+ * item's width, never on zoom.
+ */
+function wrapText(text: string, maxChars: number, maxLines: number): string[] {
+  if (!text || maxLines < 1) return [];
+  const words = text.split(/\s+/);
+  const lines: string[] = [];
+  let line = "";
+  for (const word of words) {
+    const candidate = line ? line + " " + word : word;
+    if (candidate.length <= maxChars || !line) {
+      line = candidate;
+    } else {
+      lines.push(line);
+      line = word;
+      if (lines.length === maxLines) break;
+    }
+  }
+  if (lines.length < maxLines && line) lines.push(line);
+  if (lines.length === maxLines && line && lines[maxLines - 1] !== line) {
+    lines[maxLines - 1] =
+      lines[maxLines - 1].slice(0, Math.max(1, maxChars - 1)) + "…";
+  }
+  return lines;
+}
+
+/** Rough advance width of a glyph as a fraction of the font size. */
+const SVG_GLYPH_FACTOR = 0.6;
+
+/** Builds a wrapped, board-scaled label block centered on the item. */
+function itemLabel(
+  item: BoardItem,
+  cx: number,
+  cy: number,
+  w: number,
+  h: number,
+): SvgLabel | null {
+  const text = stripHtml(item.data?.title ?? item.data?.content).slice(0, 300);
+  if (!text) return null;
+  const style = (item.style ?? {}) as ItemStyle;
+  // Stickies auto-size their text in Miro; approximate from the sticky's
+  // height. Everything else honors style.fontSize.
+  const fontSize =
+    item.type === "sticky_note"
+      ? Math.min(40, Math.max(10, h * 0.09))
+      : asNumber(style.fontSize, 14);
+  const lineHeight = fontSize * 1.25;
+  const maxChars = Math.max(3, Math.floor((w * 0.9) / (fontSize * SVG_GLYPH_FACTOR)));
+  const maxLines = Math.max(1, Math.floor((h * 0.85) / lineHeight));
+  const lines = wrapText(text, maxChars, maxLines);
+  if (lines.length === 0) return null;
+  return {
+    x: cx,
+    y: cy,
+    lines,
+    fontSize,
+    lineHeight,
+    anchor: "middle",
+    color: resolvePaint(style.color) ?? style.color ?? "#1c1917",
+  };
 }
 
 class SvgBounds {
@@ -851,28 +929,53 @@ interface SvgAccumulator {
   bounds: SvgBounds;
 }
 
+function pushShapeRect(
+  acc: SvgAccumulator,
+  item: BoardItem,
+  cx: number,
+  cy: number,
+  w: number,
+  h: number,
+): void {
+  const style = (item.style ?? {}) as ItemStyle;
+  const isSticky = item.type === "sticky_note";
+  const isFrame = item.type === "frame";
+  acc.rects.push({
+    id: item.id,
+    itemType: item.type,
+    kind: item.type === "shape" ? (item.data?.shape ?? "rectangle") : "",
+    x: cx - w / 2,
+    y: cy - h / 2,
+    width: w,
+    height: h,
+    fill: svgFill(item),
+    fillOpacity: asNumber(style.fillOpacity, 1),
+    stroke: isSticky
+      ? "none"
+      : (resolvePaint(style.borderColor) ?? (isFrame ? "#999999" : "#1a1a1a")),
+    strokeWidth: asNumber(style.borderWidth, isFrame ? 1 : 2),
+    strokeStyle: isFrame ? "dashed" : (style.borderStyle ?? "normal"),
+  });
+}
+
 function renderSvgItem(acc: SvgAccumulator, item: BoardItem): boolean {
   if (!svgRenderable(item)) return false;
-  const label = svgLabelText(item.data?.title ?? item.data?.content);
   const cx = item.position?.x ?? 0;
   const cy = item.position?.y ?? 0;
-  const w = item.geometry?.width ?? 0;
-  const h = item.geometry?.height ?? 0;
+  let w = item.geometry?.width ?? 0;
+  let h = item.geometry?.height ?? 0;
+  const style = (item.style ?? {}) as ItemStyle;
 
   switch (item.type) {
     case "text": {
-      const textW = w > 0 ? w : label.length * 8;
-      acc.bounds.add(cx - textW / 2, cy - 10, textW, 20);
-      acc.labels.push({
-        x: cx,
-        y: cy,
-        text: label,
-        fontSize: 14,
-        anchor: "middle",
-        muted: false,
-        maxWidth: textW,
-        onFill: false,
-      });
+      const text = stripHtml(item.data?.content).slice(0, 300);
+      if (!text) return false;
+      const fontSize = asNumber(style.fontSize, 14);
+      if (w <= 0) w = text.length * fontSize * SVG_GLYPH_FACTOR;
+      if (h <= 0) h = fontSize * 1.4;
+      acc.bounds.add(cx - w / 2, cy - h / 2, w, h);
+      const label = itemLabel(item, cx, cy, w, Math.max(h, fontSize * 5));
+      if (label) acc.labels.push(label);
       return true;
     }
     case "shape": {
@@ -885,57 +988,31 @@ function renderSvgItem(acc: SvgAccumulator, item: BoardItem): boolean {
           rx: w / 2,
           ry: h / 2,
           fill: svgFill(item),
+          fillOpacity: asNumber(style.fillOpacity, 1),
+          stroke: resolvePaint(style.borderColor) ?? "#1a1a1a",
+          strokeWidth: asNumber(style.borderWidth, 2),
         });
       } else {
-        acc.rects.push({
-          id: item.id,
-          itemType: "shape",
-          x: cx - w / 2,
-          y: cy - h / 2,
-          width: w,
-          height: h,
-          rx: 0,
-          fill: svgFill(item),
-          dashed: false,
-        });
+        pushShapeRect(acc, item, cx, cy, w, h);
       }
-      if (label) {
-        acc.labels.push({
-          x: cx,
-          y: cy,
-          text: label,
-          fontSize: 12,
-          anchor: "middle",
-          muted: false,
-          maxWidth: w,
-          onFill: true,
-        });
-      }
+      const label = itemLabel(item, cx, cy, w, h);
+      if (label) acc.labels.push(label);
       return true;
     }
     case "frame": {
       acc.bounds.add(cx - w / 2, cy - h / 2, w, h);
-      acc.rects.push({
-        id: item.id,
-        itemType: "frame",
-        x: cx - w / 2,
-        y: cy - h / 2,
-        width: w,
-        height: h,
-        rx: 0,
-        fill: "none",
-        dashed: true,
-      });
-      if (label) {
+      pushShapeRect(acc, item, cx, cy, w, h);
+      const title = stripHtml(item.data?.title).slice(0, 120);
+      if (title) {
+        const fontSize = Math.min(32, Math.max(12, w * 0.02));
         acc.labels.push({
           x: cx - w / 2 + 4,
-          y: cy - h / 2 - 6,
-          text: label,
-          fontSize: 12,
+          y: cy - h / 2 - fontSize,
+          lines: [title],
+          fontSize,
+          lineHeight: fontSize * 1.25,
           anchor: "start",
-          muted: true,
-          maxWidth: 0,
-          onFill: false,
+          color: "#8c8c8c",
         });
       }
       return true;
@@ -946,28 +1023,10 @@ function renderSvgItem(acc: SvgAccumulator, item: BoardItem): boolean {
     case "image":
     case "document": {
       acc.bounds.add(cx - w / 2, cy - h / 2, w, h);
-      acc.rects.push({
-        id: item.id,
-        itemType: item.type,
-        x: cx - w / 2,
-        y: cy - h / 2,
-        width: w,
-        height: h,
-        rx: 4,
-        fill: svgFill(item),
-        dashed: false,
-      });
-      if (label) {
-        acc.labels.push({
-          x: cx,
-          y: cy,
-          text: label,
-          fontSize: 12,
-          anchor: "middle",
-          muted: false,
-          maxWidth: w,
-          onFill: true,
-        });
+      pushShapeRect(acc, item, cx, cy, w, h);
+      if (item.type !== "image") {
+        const label = itemLabel(item, cx, cy, w, h);
+        if (label) acc.labels.push(label);
       }
       return true;
     }
@@ -990,17 +1049,16 @@ function renderSvgConnectors(
     const x2 = to.position?.x ?? 0;
     const y2 = to.position?.y ?? 0;
     acc.lines.push({ id: conn.id, x1, y1, x2, y2 });
-    const caption = svgLabelText(conn.captions?.[0]?.content);
+    const caption = stripHtml(conn.captions?.[0]?.content).slice(0, 80);
     if (caption) {
       acc.labels.push({
         x: (x1 + x2) / 2,
-        y: (y1 + y2) / 2 - 4,
-        text: caption,
-        fontSize: 10,
+        y: (y1 + y2) / 2 - 8,
+        lines: [caption],
+        fontSize: 12,
+        lineHeight: 15,
         anchor: "middle",
-        muted: true,
-        maxWidth: 0,
-        onFill: false,
+        color: "#6b7280",
       });
     }
   }
