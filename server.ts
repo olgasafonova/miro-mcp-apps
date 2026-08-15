@@ -630,6 +630,16 @@ export function createServer(): McpServer {
             color: z.string(),
           }),
         ),
+        images: z.array(
+          z.object({
+            id: z.string(),
+            x: z.number(),
+            y: z.number(),
+            width: z.number(),
+            height: z.number(),
+            href: z.string(),
+          }),
+        ),
         rendered: z.number(),
         skipped: z.number(),
         totalItems: z.number(),

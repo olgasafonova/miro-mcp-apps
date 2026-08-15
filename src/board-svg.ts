@@ -63,6 +63,15 @@ interface SvgLabel {
   color: string;
 }
 
+interface SvgImage {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  href: string;
+}
+
 interface ViewBox {
   x: number;
   y: number;
@@ -79,6 +88,7 @@ interface BoardSvgResult {
   ellipses: SvgEllipse[];
   lines: SvgLine[];
   labels: SvgLabel[];
+  images: SvgImage[];
   rendered: number;
   skipped: number;
   totalItems: number;
@@ -365,6 +375,24 @@ function appendImageGlyph(parent: SVGGElement, r: SvgRect) {
   parent.appendChild(g);
 }
 
+/** A real image item, drawn from server-fetched preview bits. The item's
+ * geometry already matches the image's aspect ratio, so filling the box
+ * exactly is distortion-free. */
+function appendImage(parent: SVGGElement, im: SvgImage) {
+  const image = document.createElementNS(SVG_NS, "image");
+  setAttrs(image, {
+    x: im.x,
+    y: im.y,
+    width: im.width,
+    height: im.height,
+    preserveAspectRatio: "none",
+    "data-miro-id": im.id,
+    "data-miro-type": "image",
+  });
+  image.setAttribute("href", im.href);
+  parent.appendChild(image);
+}
+
 function appendEllipse(parent: SVGGElement, e: SvgEllipse) {
   const ellipse = document.createElementNS(SVG_NS, "ellipse");
   setAttrs(ellipse, {
@@ -457,6 +485,7 @@ function render(data: BoardSvgResult) {
   // Draw order: rects arrive frames-first from the builder, so frames sit
   // under everything; connectors go above shapes, labels on top.
   for (const r of data.rects) appendRect(layer, r);
+  for (const im of data.images) appendImage(layer, im);
   for (const e of data.ellipses) appendEllipse(layer, e);
   for (const l of data.lines) appendLine(layer, l);
   for (const l of data.labels) appendLabel(layer, l);

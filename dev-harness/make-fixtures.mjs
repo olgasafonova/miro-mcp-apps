@@ -22,12 +22,13 @@ const withComments = await buildCommentThreads(boardWithComments);
 const empty = await buildCommentThreads(boardEmpty);
 const recent = await buildRecentBoards(8);
 const svg = await buildBoardSvg(boardWithComments);
+const svgReal = await buildBoardSvg("uXjVHc6Y_JE="); // Design Sprint: real image resources
 const svgEmpty = await buildBoardSvg(boardEmpty);
 
 fs.writeFileSync(
   new URL("./fixtures.js", import.meta.url),
   "window.FIXTURES=" +
-    JSON.stringify({ withComments, empty, recent, svg, svgEmpty }, null, 1) +
+    JSON.stringify({ withComments, empty, recent, svg, svgReal, svgEmpty }, null, 1) +
     ";\n",
 );
 console.log("fixtures.js written:", {
@@ -36,5 +37,7 @@ console.log("fixtures.js written:", {
   boards: recent.boards.length,
   svgRects: svg.rects.length,
   svgLabels: svg.labels.length,
+  svgImages: svg.images.length,
+  svgRealImages: svgReal.images.length,
   svgEmptyRendered: svgEmpty.rendered,
 });
