@@ -101,6 +101,8 @@ Run in HTTP mode (above), expose via ngrok or similar, then add as a connector i
 ├── sticky-clusters.html  # UI shell — bundles to dist/sticky-clusters.html
 ├── recent-boards.html    # UI shell — bundles to dist/recent-boards.html
 ├── connectors.html       # UI shell — bundles to dist/connectors.html
+├── comments.html         # UI shell — bundles to dist/comments.html
+├── dev-harness/          # Bridge-protocol host page for exercising built views outside a real host
 └── src/
     ├── global.css        # Shared design tokens (Miro yellow accent #FFD02F, spacing scale, host-context fallbacks)
     ├── board-summary.{ts,css}
@@ -108,14 +110,19 @@ Run in HTTP mode (above), expose via ngrok or similar, then add as a connector i
     ├── frame-overview.{ts,css}
     ├── sticky-clusters.{ts,css}
     ├── recent-boards.{ts,css}
-    └── connectors.{ts,css}
+    ├── connectors.{ts,css}
+    └── comments.{ts,css}
 ```
 
 The `ext-apps` pattern: each tool registers with `_meta.ui.resourceUri` pointing at a `ui://` resource that returns bundled HTML. The host fetches the resource, renders it in a sandboxed iframe, and routes the tool result to the iframe via the App SDK's `ontoolresult` handler.
 
+One transport-level patch: Claude Desktop rejects tools whose schemas declare JSON Schema draft-07, which is what MCP SDK 1.29/1.30 emits when converting zod schemas. `withDialectFix` in `main.ts` rewrites the declaration to draft 2020-12 on outgoing tool lists — exact here because these schemas use no draft-sensitive keywords. Remove once the SDK targets 2020-12 itself.
+
+`dev-harness/harness.html` implements the host side of the bridge handshake (`ui/initialize` → `initialized` → `ui/notifications/tool-result`) so a built view can be driven in a plain browser — filters, empty states, `openLink`, dark theme, host style variables — without any MCP host in the loop. `dev-harness/make-fixtures.mjs` generates its fixture data through the same `miro-client.ts` builders the server uses.
+
 ## Known limitations (pilot scope)
 
-- Rendering validated in Claude Desktop only; not yet exercised in the other 5 supported MCP Apps clients (ChatGPT, Claude.ai, VS Code, Goose, Postman, MCPJam)
+- Rendering validated in Claude Desktop and MCPJam; not yet exercised in ChatGPT, Claude.ai, VS Code, Goose, or Postman
 - Single-board scope per tool call (no multi-board comparisons)
 - No state persistence; each tool invocation is independent
 - Per-board item fetches capped at Miro's 50–100 max page size (no pagination loop). Boards with 1000+ items will surface only the first page
