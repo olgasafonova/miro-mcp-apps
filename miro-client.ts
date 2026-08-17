@@ -619,6 +619,118 @@ export async function buildCommentThreads(
     total: comments.total ?? threads.length,
   };
 }
+// ---- Tool 9: tag map ----
+
+/** A board tag, as the tags endpoint returns it. */
+export interface Tag {
+  id: string;
+  title: string;
+  fillColor?: string;
+}
+
+interface TagsResponse {
+  data: Tag[];
+  total?: number;
+  size?: number;
+}
+
+export async function listTags(
+  boardId: string,
+  limit: number = 50,
+): Promise<TagsResponse> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return miroFetch<TagsResponse>(
+    `/boards/${encodeURIComponent(boardId)}/tags?${params.toString()}`,
+  );
+}
+
+/** Items carrying a given tag. Uses the offset-paginated tag filter of the
+ * items endpoint (same route the Go server's miro_get_items_by_tag wraps). */
+export async function listItemsByTag(
+  boardId: string,
+  tagId: string,
+  limit: number = 50,
+): Promise<BoardItemsResponse> {
+  const params = new URLSearchParams({
+    tag_id: tagId,
+    limit: String(limit),
+  });
+  return miroFetch<BoardItemsResponse>(
+    `/boards/${encodeURIComponent(boardId)}/items?${params.toString()}`,
+  );
+}
+
+export interface TagMapItem {
+  id: string;
+  type: string;
+  label: string;
+  selfLink?: string;
+}
+
+export interface TagMapTag {
+  id: string;
+  title: string;
+  /** Miro tag color name (red, magenta, violet, blue, cyan, green, yellow,
+   * orange, gray); the view maps it to a swatch. */
+  color: string;
+  count: number;
+  items: TagMapItem[];
+}
+
+export interface TagMapResult {
+  boardId: string;
+  boardName: string;
+  viewLink: string;
+  totalTags: number;
+  /** Tags with their tagged items, sorted by item count descending. */
+  tags: TagMapTag[];
+}
+
+/** Tags fetched per board; Miro's tag limit per board is 500 but a usable
+ * map tops out well below that. */
+const MAX_TAGS = 20;
+/** Items fetched per tag (endpoint page maximum). */
+const TAG_ITEMS_LIMIT = 50;
+
+export async function buildTagMap(boardId: string): Promise<TagMapResult> {
+  const [board, tagsRes] = await Promise.all([
+    getBoard(boardId),
+    listTags(boardId),
+  ]);
+
+  const tagList = tagsRes.data.slice(0, MAX_TAGS);
+  const itemsPerTag = await Promise.all(
+    tagList.map((tag) =>
+      listItemsByTag(boardId, tag.id, TAG_ITEMS_LIMIT).catch(
+        (): BoardItemsResponse => ({ data: [], total: 0, size: 0 }),
+      ),
+    ),
+  );
+
+  const tags: TagMapTag[] = tagList
+    .map((tag, i) => ({
+      id: tag.id,
+      title: tag.title,
+      color: tag.fillColor ?? "gray",
+      count: itemsPerTag[i].data.length,
+      items: itemsPerTag[i].data.map((item) => ({
+        id: item.id,
+        type: item.type,
+        label: deriveLabel(item),
+        selfLink: item.links?.self,
+      })),
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  return {
+    boardId: board.id,
+    boardName: board.name,
+    viewLink: board.viewLink,
+    totalTags: tagsRes.total ?? tagsRes.data.length,
+    tags,
+  };
+}
+
 // ---- Tool 8: board SVG ----
 //
 // TypeScript rewrite of the Go server's miro/svg_read.go geometry, upgraded
@@ -884,7 +996,10 @@ function itemLabel(
       ? Math.min(40, Math.max(10, h * 0.09))
       : asNumber(style.fontSize, 14);
   const lineHeight = fontSize * 1.25;
-  const maxChars = Math.max(3, Math.floor((w * 0.9) / (fontSize * SVG_GLYPH_FACTOR)));
+  const maxChars = Math.max(
+    3,
+    Math.floor((w * 0.9) / (fontSize * SVG_GLYPH_FACTOR)),
+  );
   const maxLines = Math.max(1, Math.floor((h * 0.85) / lineHeight));
   const lines = wrapText(text, maxChars, maxLines);
   if (lines.length === 0) return null;

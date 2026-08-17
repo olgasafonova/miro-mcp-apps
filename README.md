@@ -1,6 +1,6 @@
 # miro-mcp-apps
 
-MCP Apps pilot for Miro. Eight tools that return **interactive UI** instead of JSON (board-summary card, items table, frame card-grid, sticky-note color clusters, recent-boards table, connectors SVG graph, comment threads, board spatial map) rendered inline in MCP Apps-compatible hosts (Claude Desktop, Claude.ai, ChatGPT, VS Code, Goose, Postman, MCPJam).
+MCP Apps pilot for Miro. Nine tools that return **interactive UI** instead of JSON (board-summary card, items table, frame card-grid, sticky-note color clusters, recent-boards table, connectors SVG graph, comment threads, board spatial map, tag-usage map) rendered inline in MCP Apps-compatible hosts (Claude Desktop, Claude.ai, ChatGPT, VS Code, Goose, Postman, MCPJam).
 
 Host validation for the rendering path landed in Claude Desktop 24-05-2026 (board-summary card rendered cleanly for a 101-item demo board with bar chart, recent items, and Open-in-Miro CTA).
 
@@ -24,6 +24,7 @@ This is the n4o pilot from `claude-code-config-n4o`. See bead for strategic cont
 | `miro_connectors_app` | SVG graph of items + connectors — nodes are items with at least one connector, edges carry caption text where present, normalized from Miro-space coordinates to a 600×400 viewport. | `board_id` |
 | `miro_comment_threads_app` | Comment threads as filterable cards (open / resolved / all), each with its opening message and replies inline. Read-only. Uses the v2-experimental API. | `board_id`, optional `limit` (default 50) |
 | `miro_board_svg_app` | The whole board rendered like Miro's own canvas: real shape kinds (cloud, round-rectangle, triangle, …), real fill/border styles, wrapped text that scales with zoom, connectors with arrowheads, image placeholders. Drag to pan, scroll to zoom, Fit to reset. TypeScript port of the Go server's `miro_read_board_svg` geometry, upgraded for fidelity. | `board_id`, optional `max_items` (default 500, max 2000) |
+| `miro_tag_map_app` | Tag-usage map: every board tag as a color-coded chip with the items carrying it clustered underneath, sorted by usage. Read-only. | `board_id` |
 
 ## Prerequisites
 
@@ -93,7 +94,7 @@ Run in HTTP mode (above), expose via ngrok or similar, then add as a connector i
 
 ```
 .
-├── server.ts             # Registers 8 tools + 8 ui:// resources via @modelcontextprotocol/ext-apps/server
+├── server.ts             # Registers 9 tools + 9 ui:// resources via @modelcontextprotocol/ext-apps/server
 ├── main.ts               # Stdio + Streamable HTTP transport entry point
 ├── miro-client.ts        # Minimal fetch wrapper around Miro REST API v2 + per-tool builders
 ├── board-summary.html    # UI shell — bundles to dist/board-summary.html
@@ -147,8 +148,8 @@ Per beads `miro-mcp-server-n4o` (host validation) and `miro-mcp-server-8c3` (4-t
 | Repo | What it does | Runtime |
 |---|---|---|
 | [`miro-cli`](https://github.com/olgasafonova/miro-cli) | Wraps the Miro REST API as shell commands; local SQLite mirror for offline search; bulk-migration verbs | Shell / CI / Makefile |
-| [`miro-mcp-server`](https://github.com/olgasafonova/miro-mcp-server) | 92 CRUD tools for working with Miro programmatically from any MCP client | Go MCP server, stdio/HTTP |
-| **`miro-mcp-apps`** (this repo) | 8 tools that return interactive UI rendered inline in the chat | TypeScript MCP Apps server, stdio/HTTP |
+| [`miro-mcp-server`](https://github.com/olgasafonova/miro-mcp-server) | 108 CRUD tools for working with Miro programmatically from any MCP client | Go MCP server, stdio/HTTP |
+| **`miro-mcp-apps`** (this repo) | 9 tools that return interactive UI rendered inline in the chat | TypeScript MCP Apps server, stdio/HTTP |
 
 All three sit on the Miro REST API and share `MIRO_ACCESS_TOKEN`.
 

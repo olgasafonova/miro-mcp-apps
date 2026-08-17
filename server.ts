@@ -20,6 +20,7 @@ import {
   buildListItems,
   buildRecentBoards,
   buildStickyClusters,
+  buildTagMap,
 } from "./miro-client.js";
 
 // Works both from source (tsx server.ts) and compiled (node dist/server.js).
@@ -37,6 +38,7 @@ const RECENT_BOARDS_URI = "ui://miro-recent-boards/mcp-app.html";
 const CONNECTORS_URI = "ui://miro-connectors/mcp-app.html";
 const COMMENTS_URI = "ui://miro-comments/mcp-app.html";
 const BOARD_SVG_URI = "ui://miro-board-svg/mcp-app.html";
+const TAG_MAP_URI = "ui://miro-tag-map/mcp-app.html";
 
 export function createServer(): McpServer {
   const server = new McpServer({
@@ -677,6 +679,85 @@ export function createServer(): McpServer {
       return {
         contents: [
           { uri: BOARD_SVG_URI, mimeType: RESOURCE_MIME_TYPE, text: html },
+        ],
+      };
+    },
+  );
+
+  // ---- Tool 9: tag_map (color-coded tag cluster UI) ----
+
+  registerAppTool(
+    server,
+    "miro_tag_map_app",
+    {
+      title: "Miro Tag Map (UI)",
+      description:
+        "USE WHEN the user wants to see how a Miro board is tagged: every " +
+        "tag as a color-coded chip with the items carrying it clustered " +
+        "underneath, sorted by usage. Renders a tag-usage map instead of " +
+        "JSON. Read-only — to create or attach tags, use the Go " +
+        "miro-mcp-server's miro_create_tag / miro_attach_tag.",
+      inputSchema: { board_id: z.string().describe("Miro board ID") },
+      // Declare every field: the schema is applied to structuredContent, so an
+      // undeclared key is stripped before the view sees it.
+      outputSchema: z.object({
+        boardId: z.string(),
+        boardName: z.string(),
+        viewLink: z.string(),
+        totalTags: z.number(),
+        tags: z.array(
+          z.object({
+            id: z.string(),
+            title: z.string(),
+            color: z.string(),
+            count: z.number(),
+            items: z.array(
+              z.object({
+                id: z.string(),
+                type: z.string(),
+                label: z.string(),
+                selfLink: z.string().optional(),
+              }),
+            ),
+          }),
+        ),
+      }),
+      _meta: { ui: { resourceUri: TAG_MAP_URI } },
+    },
+    async ({ board_id }): Promise<CallToolResult> => {
+      const result = await buildTagMap(board_id);
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `Board '${result.boardName}' — ${result.totalTags} tags, ` +
+              `busiest: ${
+                result.tags
+                  .slice(0, 3)
+                  .map((t) => `${t.title} (${t.count})`)
+                  .join(", ") || "none"
+              }.`,
+          },
+        ],
+        structuredContent: { ...result },
+      };
+    },
+  );
+
+  registerAppResource(
+    server,
+    TAG_MAP_URI,
+    TAG_MAP_URI,
+    { mimeType: RESOURCE_MIME_TYPE },
+    async (): Promise<ReadResourceResult> => {
+      const html = await fs.readFile(
+        path.join(DIST_DIR, "tag-map.html"),
+        "utf-8",
+      );
+      return {
+        contents: [
+          { uri: TAG_MAP_URI, mimeType: RESOURCE_MIME_TYPE, text: html },
         ],
       };
     },
