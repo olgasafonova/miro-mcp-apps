@@ -18,6 +18,7 @@ import {
   buildConnectorsGraph,
   buildFrameOverview,
   buildListItems,
+  buildMindmapTree,
   buildRecentBoards,
   buildStickyClusters,
   buildTagMap,
@@ -39,6 +40,7 @@ const CONNECTORS_URI = "ui://miro-connectors/mcp-app.html";
 const COMMENTS_URI = "ui://miro-comments/mcp-app.html";
 const BOARD_SVG_URI = "ui://miro-board-svg/mcp-app.html";
 const TAG_MAP_URI = "ui://miro-tag-map/mcp-app.html";
+const MINDMAP_TREE_URI = "ui://miro-mindmap-tree/mcp-app.html";
 
 export function createServer(): McpServer {
   const server = new McpServer({
@@ -758,6 +760,80 @@ export function createServer(): McpServer {
       return {
         contents: [
           { uri: TAG_MAP_URI, mimeType: RESOURCE_MIME_TYPE, text: html },
+        ],
+      };
+    },
+  );
+
+  // ---- Tool 10: mindmap_tree (hierarchical tree UI) ----
+
+  registerAppTool(
+    server,
+    "miro_mindmap_tree_app",
+    {
+      title: "Miro Mindmap Tree (UI)",
+      description:
+        "USE WHEN the user wants to read a Miro mindmap as an indented " +
+        "tree: roots, branches, and leaves with their hierarchy visible at " +
+        "a glance. A board can hold several mindmaps; each renders under " +
+        "its root. Read-only — to add nodes, use the Go miro-mcp-server's " +
+        "miro_create_mindmap_node. Uses Miro's v2-experimental API, which " +
+        "may be unavailable on some accounts or plans.",
+      inputSchema: { board_id: z.string().describe("Miro board ID") },
+      // Declare every field: the schema is applied to structuredContent, so an
+      // undeclared key is stripped before the view sees it.
+      outputSchema: z.object({
+        boardId: z.string(),
+        boardName: z.string(),
+        viewLink: z.string(),
+        totalNodes: z.number(),
+        rootCount: z.number(),
+        truncated: z.boolean(),
+        nodes: z.array(
+          z.object({
+            id: z.string(),
+            parentId: z.string().optional(),
+            content: z.string(),
+            depth: z.number(),
+            isRoot: z.boolean(),
+            color: z.string().optional(),
+            childCount: z.number(),
+            selfLink: z.string().optional(),
+          }),
+        ),
+      }),
+      _meta: { ui: { resourceUri: MINDMAP_TREE_URI } },
+    },
+    async ({ board_id }): Promise<CallToolResult> => {
+      const result = await buildMindmapTree(board_id);
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `Board '${result.boardName}' — ${result.totalNodes} mindmap ` +
+              `node${result.totalNodes === 1 ? "" : "s"} in ` +
+              `${result.rootCount} mindmap${result.rootCount === 1 ? "" : "s"}.`,
+          },
+        ],
+        structuredContent: { ...result },
+      };
+    },
+  );
+
+  registerAppResource(
+    server,
+    MINDMAP_TREE_URI,
+    MINDMAP_TREE_URI,
+    { mimeType: RESOURCE_MIME_TYPE },
+    async (): Promise<ReadResourceResult> => {
+      const html = await fs.readFile(
+        path.join(DIST_DIR, "mindmap-tree.html"),
+        "utf-8",
+      );
+      return {
+        contents: [
+          { uri: MINDMAP_TREE_URI, mimeType: RESOURCE_MIME_TYPE, text: html },
         ],
       };
     },

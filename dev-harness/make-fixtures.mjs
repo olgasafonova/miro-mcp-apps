@@ -11,6 +11,7 @@
 import {
   buildBoardSvg,
   buildCommentThreads,
+  buildMindmapTree,
   buildRecentBoards,
   buildTagMap,
 } from "../dist/miro-client.js";
@@ -27,12 +28,25 @@ const svgReal = await buildBoardSvg("uXjVHc6Y_JE="); // Design Sprint: real imag
 const svgEmpty = await buildBoardSvg(boardEmpty);
 const tagMap = await buildTagMap(boardWithComments);
 const tagMapEmpty = await buildTagMap(boardEmpty);
+const mindmap = await buildMindmapTree(boardWithComments);
+const mindmapEmpty = await buildMindmapTree(boardEmpty);
 
 fs.writeFileSync(
   new URL("./fixtures.js", import.meta.url),
   "window.FIXTURES=" +
     JSON.stringify(
-      { withComments, empty, recent, svg, svgReal, svgEmpty, tagMap, tagMapEmpty },
+      {
+        withComments,
+        empty,
+        recent,
+        svg,
+        svgReal,
+        svgEmpty,
+        tagMap,
+        tagMapEmpty,
+        mindmap,
+        mindmapEmpty,
+      },
       null,
       1,
     ) +
@@ -49,4 +63,6 @@ console.log("fixtures.js written:", {
   svgEmptyRendered: svgEmpty.rendered,
   tagMapTags: tagMap.tags.length,
   tagMapEmptyTags: tagMapEmpty.tags.length,
+  mindmapNodes: mindmap.nodes.length,
+  mindmapEmptyNodes: mindmapEmpty.nodes.length,
 });
