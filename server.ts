@@ -12,6 +12,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import {
+  buildBoardMembers,
   buildBoardSummary,
   buildBoardSvg,
   buildCommentThreads,
@@ -41,6 +42,7 @@ const COMMENTS_URI = "ui://miro-comments/mcp-app.html";
 const BOARD_SVG_URI = "ui://miro-board-svg/mcp-app.html";
 const TAG_MAP_URI = "ui://miro-tag-map/mcp-app.html";
 const MINDMAP_TREE_URI = "ui://miro-mindmap-tree/mcp-app.html";
+const BOARD_MEMBERS_URI = "ui://miro-board-members/mcp-app.html";
 
 export function createServer(): McpServer {
   const server = new McpServer({
@@ -834,6 +836,77 @@ export function createServer(): McpServer {
       return {
         contents: [
           { uri: MINDMAP_TREE_URI, mimeType: RESOURCE_MIME_TYPE, text: html },
+        ],
+      };
+    },
+  );
+
+  // ---- Tool 11: board_members (avatar grid UI) ----
+
+  registerAppTool(
+    server,
+    "miro_board_members_app",
+    {
+      title: "Miro Board Members (UI)",
+      description:
+        "USE WHEN the user wants to see who has access to a Miro board: " +
+        "every member as an avatar card with their role (owner, coowner, " +
+        "editor, commenter, viewer, guest) and a per-role breakdown. " +
+        "Renders an avatar grid instead of JSON. Read-only — to share the " +
+        "board or change a role, use the Go miro-mcp-server's " +
+        "miro_share_board / miro_update_board_member.",
+      inputSchema: { board_id: z.string().describe("Miro board ID") },
+      // Declare every field: the schema is applied to structuredContent, so an
+      // undeclared key is stripped before the view sees it.
+      outputSchema: z.object({
+        boardId: z.string(),
+        boardName: z.string(),
+        viewLink: z.string(),
+        total: z.number(),
+        members: z.array(
+          z.object({
+            id: z.string(),
+            name: z.string(),
+            role: z.string(),
+          }),
+        ),
+        roleCounts: z.record(z.string(), z.number()),
+      }),
+      _meta: { ui: { resourceUri: BOARD_MEMBERS_URI } },
+    },
+    async ({ board_id }): Promise<CallToolResult> => {
+      const result = await buildBoardMembers(board_id);
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `Board '${result.boardName}' — ${result.total} member` +
+              `${result.total === 1 ? "" : "s"} (` +
+              Object.entries(result.roleCounts)
+                .map(([role, n]) => `${n} ${role}`)
+                .join(", ") +
+              `).`,
+          },
+        ],
+        structuredContent: { ...result },
+      };
+    },
+  );
+
+  registerAppResource(
+    server,
+    BOARD_MEMBERS_URI,
+    BOARD_MEMBERS_URI,
+    { mimeType: RESOURCE_MIME_TYPE },
+    async (): Promise<ReadResourceResult> => {
+      const html = await fs.readFile(
+        path.join(DIST_DIR, "board-members.html"),
+        "utf-8",
+      );
+      return {
+        contents: [
+          { uri: BOARD_MEMBERS_URI, mimeType: RESOURCE_MIME_TYPE, text: html },
         ],
       };
     },
