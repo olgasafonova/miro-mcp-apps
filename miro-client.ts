@@ -619,6 +619,150 @@ export async function buildCommentThreads(
     total: comments.total ?? threads.length,
   };
 }
+// ---- Tool 10: mindmap tree ----
+
+/**
+ * Wire shape of a mindmap node (v2-experimental). Content lives nested at
+ * data.nodeView.data.content as HTML; hierarchy comes from parent.id, with
+ * data.isRoot marking roots (a board can hold several mindmaps).
+ */
+interface ApiMindmapNode {
+  id: string;
+  data?: {
+    isRoot?: boolean;
+    nodeView?: {
+      data?: { content?: string };
+    };
+  };
+  style?: { nodeColor?: string };
+  parent?: { id?: string };
+  links?: { self?: string };
+}
+
+interface MindmapNodesResponse {
+  data: ApiMindmapNode[];
+  total?: number;
+  size?: number;
+  links?: { self?: string; next?: string };
+}
+
+/** Page cap for the mindmap-node fetch. */
+const MAX_MINDMAP_NODES = 500;
+/** Miro's per-page maximum for the mindmap-nodes endpoint. */
+const MINDMAP_PAGE_LIMIT = 50;
+
+/** Follows links.next cursors until every node is fetched or the cap hits. */
+async function listAllMindmapNodes(
+  boardId: string,
+): Promise<{ nodes: ApiMindmapNode[]; total: number; truncated: boolean }> {
+  const nodes: ApiMindmapNode[] = [];
+  let total = 0;
+  let cursor: string | undefined;
+
+  for (;;) {
+    const params = new URLSearchParams();
+    params.set(
+      "limit",
+      String(Math.min(MINDMAP_PAGE_LIMIT, MAX_MINDMAP_NODES - nodes.length)),
+    );
+    if (cursor) params.set("cursor", cursor);
+    const page = await miroFetch<MindmapNodesResponse>(
+      `/boards/${encodeURIComponent(boardId)}/mindmap_nodes?${params.toString()}`,
+      MIRO_API_EXPERIMENTAL_BASE,
+    );
+    nodes.push(...page.data);
+    total = page.total ?? nodes.length;
+    const next = page.links?.next;
+    if (!next || nodes.length >= MAX_MINDMAP_NODES) {
+      return { nodes, total, truncated: Boolean(next) };
+    }
+    cursor = new URL(next).searchParams.get("cursor") ?? undefined;
+    if (!cursor) return { nodes, total, truncated: true };
+  }
+}
+
+export interface MindmapTreeNode {
+  id: string;
+  /** Absent on roots and on orphans whose parent was not fetched. */
+  parentId?: string;
+  content: string;
+  /** 0 for roots; orphans surface at 0 with isRoot false. */
+  depth: number;
+  isRoot: boolean;
+  /** Miro's nodeColor for the mindmap this node belongs to. */
+  color?: string;
+  childCount: number;
+  selfLink?: string;
+}
+
+export interface MindmapTreeResult {
+  boardId: string;
+  boardName: string;
+  viewLink: string;
+  totalNodes: number;
+  rootCount: number;
+  truncated: boolean;
+  /** Pre-order (depth-first) so the view renders sequentially by depth. */
+  nodes: MindmapTreeNode[];
+}
+
+export async function buildMindmapTree(
+  boardId: string,
+): Promise<MindmapTreeResult> {
+  const [board, page] = await Promise.all([
+    getBoard(boardId),
+    listAllMindmapNodes(boardId),
+  ]);
+
+  const byId = new Map(page.nodes.map((n) => [n.id, n]));
+  const children = new Map<string, ApiMindmapNode[]>();
+  const tops: ApiMindmapNode[] = [];
+  for (const n of page.nodes) {
+    const pid = n.parent?.id;
+    if (pid && byId.has(pid)) {
+      if (!children.has(pid)) children.set(pid, []);
+      children.get(pid)!.push(n);
+    } else {
+      // Roots, plus orphans whose parent fell outside the fetched pages —
+      // both surface at the top so nothing fetched goes invisible.
+      tops.push(n);
+    }
+  }
+
+  const out: MindmapTreeNode[] = [];
+  const walk = (n: ApiMindmapNode, depth: number) => {
+    const kids = children.get(n.id) ?? [];
+    out.push({
+      id: n.id,
+      parentId: n.parent?.id && byId.has(n.parent.id) ? n.parent.id : undefined,
+      content:
+        stripHtml(n.data?.nodeView?.data?.content).slice(0, 200) ||
+        `node ${n.id.slice(0, 8)}`,
+      depth,
+      isRoot: n.data?.isRoot === true,
+      color: n.style?.nodeColor,
+      childCount: kids.length,
+      selfLink: n.links?.self,
+    });
+    for (const kid of kids) walk(kid, depth + 1);
+  };
+  // Real roots first, orphans after, both in API order.
+  tops.sort(
+    (a, b) => Number(b.data?.isRoot === true) - Number(a.data?.isRoot === true),
+  );
+  for (const top of tops) walk(top, 0);
+
+  return {
+    boardId: board.id,
+    boardName: board.name,
+    viewLink: board.viewLink,
+    totalNodes: page.total,
+    rootCount: tops.filter((t) => t.data?.isRoot === true).length,
+    truncated: page.truncated,
+    nodes: out,
+  };
+}
+
 // ---- Tool 9: tag map ----
 
 /** A board tag, as the tags endpoint returns it. */
