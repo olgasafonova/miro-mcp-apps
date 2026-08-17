@@ -150,7 +150,7 @@ Per beads `miro-mcp-server-n4o` (host validation) and `miro-mcp-server-8c3` (4-t
 | Repo | What it does | Runtime |
 |---|---|---|
 | [`miro-cli`](https://github.com/olgasafonova/miro-cli) | Wraps the Miro REST API as shell commands; local SQLite mirror for offline search; bulk-migration verbs | Shell / CI / Makefile |
-| [`miro-mcp-server`](https://github.com/olgasafonova/miro-mcp-server) | 108 CRUD tools for working with Miro programmatically from any MCP client | Go MCP server, stdio/HTTP |
+| [`miro-mcp-server`](https://github.com/olgasafonova/miro-mcp-server) | 109 CRUD tools for working with Miro programmatically from any MCP client | Go MCP server, stdio/HTTP |
 | **`miro-mcp-apps`** (this repo) | 11 tools that return interactive UI rendered inline in the chat | TypeScript MCP Apps server, stdio/HTTP |
 
 All three sit on the Miro REST API and share `MIRO_ACCESS_TOKEN`.
