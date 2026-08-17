@@ -619,6 +619,100 @@ export async function buildCommentThreads(
     total: comments.total ?? threads.length,
   };
 }
+// ---- Tool 11: board members ----
+
+/** A board member, as the members endpoint returns it. */
+interface ApiBoardMember {
+  id: string;
+  name?: string;
+  role?: string;
+  links?: { self?: string };
+}
+
+interface BoardMembersResponse {
+  data: ApiBoardMember[];
+  total?: number;
+  size?: number;
+  offset?: number;
+}
+
+/** Members fetched per board (endpoint page maximum is 50; two pages). */
+const MAX_MEMBERS = 100;
+
+export interface BoardMemberView {
+  id: string;
+  name: string;
+  /** Miro board role: owner, coowner, editor, commenter, viewer, guest. */
+  role: string;
+}
+
+export interface BoardMembersResult {
+  boardId: string;
+  boardName: string;
+  viewLink: string;
+  total: number;
+  /** Sorted owner-first, then by role weight, then by name. */
+  members: BoardMemberView[];
+  /** Members per role, for the header breakdown. */
+  roleCounts: Record<string, number>;
+}
+
+const ROLE_ORDER = [
+  "owner",
+  "coowner",
+  "editor",
+  "commenter",
+  "viewer",
+  "guest",
+];
+
+function roleWeight(role: string): number {
+  const i = ROLE_ORDER.indexOf(role);
+  return i === -1 ? ROLE_ORDER.length : i;
+}
+
+export async function buildBoardMembers(
+  boardId: string,
+): Promise<BoardMembersResult> {
+  const fetchPage = (offset: number) =>
+    miroFetch<BoardMembersResponse>(
+      `/boards/${encodeURIComponent(boardId)}/members?limit=50&offset=${offset}`,
+    );
+
+  const [board, first] = await Promise.all([getBoard(boardId), fetchPage(0)]);
+  const raw = [...first.data];
+  const total = first.total ?? raw.length;
+  if (total > raw.length && raw.length < MAX_MEMBERS) {
+    const second = await fetchPage(raw.length);
+    raw.push(...second.data);
+  }
+
+  const members: BoardMemberView[] = raw
+    .map((m) => ({
+      id: m.id,
+      name: m.name?.trim() || `member ${m.id.slice(0, 8)}`,
+      role: m.role ?? "viewer",
+    }))
+    .sort(
+      (a, b) =>
+        roleWeight(a.role) - roleWeight(b.role) || a.name.localeCompare(b.name),
+    );
+
+  const roleCounts: Record<string, number> = {};
+  for (const m of members) {
+    roleCounts[m.role] = (roleCounts[m.role] ?? 0) + 1;
+  }
+
+  return {
+    boardId: board.id,
+    boardName: board.name,
+    viewLink: board.viewLink,
+    total,
+    members,
+    roleCounts,
+  };
+}
+
 // ---- Tool 10: mindmap tree ----
 
 /**

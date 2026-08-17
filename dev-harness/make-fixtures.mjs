@@ -9,6 +9,7 @@
 //   cd dev-harness && python3 -m http.server 8763
 //   open "http://localhost:8763/harness.html?view=comments&fixture=withComments&theme=light"
 import {
+  buildBoardMembers,
   buildBoardSvg,
   buildCommentThreads,
   buildMindmapTree,
@@ -30,6 +31,7 @@ const tagMap = await buildTagMap(boardWithComments);
 const tagMapEmpty = await buildTagMap(boardEmpty);
 const mindmap = await buildMindmapTree(boardWithComments);
 const mindmapEmpty = await buildMindmapTree(boardEmpty);
+const members = await buildBoardMembers(boardWithComments);
 
 fs.writeFileSync(
   new URL("./fixtures.js", import.meta.url),
@@ -46,6 +48,7 @@ fs.writeFileSync(
         tagMapEmpty,
         mindmap,
         mindmapEmpty,
+        members,
       },
       null,
       1,
@@ -65,4 +68,5 @@ console.log("fixtures.js written:", {
   tagMapEmptyTags: tagMapEmpty.tags.length,
   mindmapNodes: mindmap.nodes.length,
   mindmapEmptyNodes: mindmapEmpty.nodes.length,
+  boardMembers: members.members.length,
 });
